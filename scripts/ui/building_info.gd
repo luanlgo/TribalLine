@@ -6,6 +6,7 @@ signal upgrade_requested(building_idx: int)
 signal demolish_requested(building_idx: int)
 signal buy_food_requested(gold_amount: int)
 signal nominate_hero_requested(unit_id: String)
+signal dismiss_hero_requested()
 
 var _content: VBoxContainer
 var _current_idx: int = -1
@@ -108,7 +109,8 @@ func show_building(building_idx: int, entry: Dictionary) -> void:
 				var gold_needed: int = int(ceil(spin.value / float(GameConfig.FOOD_PER_GOLD)))
 				if gold_needed > 0:
 					buy_food_requested.emit(gold_needed)
-					# Painel continua aberto para comprar varias vezes seguidas)
+					# Painel continua aberto para comprar varias vezes seguidas
+			)
 		# Cabana do Heroi: nomear/ver heroi
 		if bd.category == "hero" and my_vs:
 			_content.add_child(HSeparator.new())
@@ -123,6 +125,10 @@ func show_building(building_idx: int, entry: Dictionary) -> void:
 					int(hs.get("attack",0)), int(hs.get("defense",0)), int(hs.get("hp",0))], 11)
 				if my_vs.hero.get("deployed", false):
 					_add_lbl("(Em campo)", 10, Color(0.7,0.7,0.7))
+			elif not my_vs.hero.is_empty():
+				# Heroi morto — mostra status e opcao de demitir
+				_add_lbl("Heroi MORTO (Nv%d)" % my_vs.hero.get("level",1), 11, Color(1,0.4,0.4))
+				_add_lbl("Demita para nomear um novo.", 11, Color(0.8,0.8,0.8))
 			else:
 				_add_lbl("Sem heroi. Nomeie uma tropa (consome 1 unidade):", 11, Color(0.8,0.8,0.8))
 				var any_unit: bool = false
@@ -140,6 +146,19 @@ func show_building(building_idx: int, entry: Dictionary) -> void:
 					_content.add_child(nb)
 				if not any_unit:
 					_add_lbl("Treine tropas primeiro.", 10, Color(0.7,0.7,0.7))
+			# Botao DEMITIR HEROI (visivel quando ha heroi, desabilitado se em campo)
+			if not my_vs.hero.is_empty():
+				var dis_btn := Button.new()
+				dis_btn.text = "DEMITIR HEROI"
+				dis_btn.add_theme_color_override("font_color", Color(1.0, 0.5, 0.2))
+				dis_btn.add_theme_font_size_override("font_size", 11)
+				dis_btn.disabled = my_vs.hero.get("deployed", false)
+				dis_btn.tooltip_text = "Remove o heroi atual. O nivel e preservado para o proximo." if not dis_btn.disabled else "Heroi em campo — aguarde retornar."
+				dis_btn.pressed.connect(func() -> void:
+					dismiss_hero_requested.emit()
+					visible = false
+				)
+				_content.add_child(dis_btn)
 		# Botao de upgrade
 		if lv < bd.max_level:
 			_content.add_child(HSeparator.new())

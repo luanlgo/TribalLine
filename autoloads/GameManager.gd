@@ -366,6 +366,16 @@ func hero_die(vs: VillageState) -> void:
 	var lvl: int = vs.hero.get("level", 1)
 	vs.hero = {"alive": false, "level": lvl}
 
+## Demite o heroi completamente (reseta o campo). Heroi destacado nao pode ser demitido.
+func server_dismiss_hero(username: String) -> String:
+	var vs: VillageState = get_village(username)
+	if not vs: return "Sem aldeia"
+	if vs.hero.is_empty(): return "Sem heroi para demitir"
+	if vs.hero.get("deployed", false): return "Heroi em campo — aguarde retornar"
+	vs.hero = {}
+	village_updated.emit(username)
+	return ""
+
 ## Aldeia esta sob protecao de saque (nao pode ser atacada agora)?
 func is_village_protected(vs: VillageState) -> bool:
 	return vs != null and vs.protection_until > _game_time

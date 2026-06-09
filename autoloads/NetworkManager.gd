@@ -345,6 +345,17 @@ func client_request_nominate_hero(unit_id: String) -> void:
 	if err != "": _send_error.rpc_id(peer, err)
 	else: _push_village(uname)
 
+## Demite o heroi atual (reseta para poder nomear outro).
+@rpc("any_peer", "reliable")
+func client_request_dismiss_hero() -> void:
+	if not multiplayer.is_server(): return
+	var peer: int = multiplayer.get_remote_sender_id()
+	var uname: String = GameManager.get_username_for_peer(peer)
+	if uname == "": return
+	var err: String = GameManager.server_dismiss_hero(uname)
+	if err != "": _send_error.rpc_id(peer, err)
+	else: _push_village(uname)
+
 ## Jogador clicou no icone de batalha para entrar/assistir.
 @rpc("any_peer", "reliable")
 func client_request_join_battle(battle_id: int) -> void:
@@ -579,6 +590,14 @@ func request_nominate_hero(unit_id: String) -> void:
 		else: _push_village(local_username)
 	else:
 		client_request_nominate_hero.rpc_id(1, unit_id)
+
+func request_dismiss_hero() -> void:
+	if multiplayer.is_server():
+		var err: String = GameManager.server_dismiss_hero(local_username)
+		if err != "": notification_received.emit("Erro: " + err)
+		else: _push_village(local_username)
+	else:
+		client_request_dismiss_hero.rpc_id(1)
 
 func request_join_battle(battle_id: int) -> void:
 	if multiplayer.is_server():

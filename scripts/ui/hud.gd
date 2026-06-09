@@ -105,7 +105,8 @@ func _build_ui() -> void:
 	_alert_panel.gui_input.connect(func(ev: InputEvent) -> void:
 		if ev is InputEventMouseButton and ev.pressed:
 			_alert_panel.visible = false
-			_alert_timer = 0.0)
+			_alert_timer = 0.0
+	)
 	add_child(_alert_panel)
 	_alert_lbl = Label.new()
 	_alert_lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -141,6 +142,8 @@ func _build_ui() -> void:
 		func(g: int) -> void: NetworkManager.request_buy_food(g))
 	_build_info.connect("nominate_hero_requested",
 		func(uid: String) -> void: NetworkManager.request_nominate_hero(uid))
+	_build_info.connect("dismiss_hero_requested",
+		func() -> void: NetworkManager.request_dismiss_hero())
 
 # ---------------------------------------------------------------------------
 func update_resources(vs: GameManager.VillageState) -> void:
