@@ -1,0 +1,11 @@
+; Modelo de credencial do banco para rodar o SERVIDOR a partir do editor Godot
+; em desenvolvimento (LOCAL). Copie este arquivo para "db.local.cfg" (que esta
+; no .gitignore) e preencha a URL do seu Redis LOCAL do Railway.
+;
+; Em PRODUCAO (Railway) NAO use este arquivo: defina a variavel de ambiente
+; TRIBALLINE_REDIS_URL (ou REDIS_URL) no servico do servidor.
+;
+; Ordem de resolucao da URL: TRIBALLINE_REDIS_URL > REDIS_URL > db.local.cfg
+
+[redis]
+url="redis://default:SUA_SENHA@host.proxy.rlwy.net:PORTA"

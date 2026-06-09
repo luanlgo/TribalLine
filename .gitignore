@@ -1,0 +1,47 @@
+# ============================================================
+#  .gitignore — TribalLine (Godot 4)
+# ============================================================
+
+# ---- Cache/import do editor Godot 4 ----
+# Regenerado automaticamente ao abrir o projeto; NUNCA deve ir pro repo.
+.godot/
+
+# ---- Builds exportados ----
+# O jogo exportado (game.pck / launcher / zips) vai para o GitHub Releases,
+# NAO para o repositorio. A pasta builds/ e gerada pelo script de export.
+/builds/
+/export/
+*.pck
+*.zip
+*.exe
+*.dmg
+*.apk
+*.aab
+
+# ---- Dados locais que nao pertencem ao repo ----
+# Saves, contas e logs ficam em user:// (AppData), mas por seguranca:
+*.save
+*.log
+
+# ---- Credenciais do banco (NUNCA commitar) ----
+# URL do Redis para rodar do editor em dev. Use db.local.cfg.example como modelo.
+db.local.cfg
+
+# ---- Sistema operacional ----
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ---- Editores / IDEs ----
+.vscode/
+.idea/
+*.swp
+*~
+
+# ---- Temporarios ----
+*.tmp
+*.bak
