@@ -356,6 +356,17 @@ func client_request_dismiss_hero() -> void:
 	if err != "": _send_error.rpc_id(peer, err)
 	else: _push_village(uname)
 
+## Redireciona todas as marchas do jogador de volta para casa.
+@rpc("any_peer", "reliable")
+func client_request_recall_marches() -> void:
+	if not multiplayer.is_server(): return
+	var peer: int = multiplayer.get_remote_sender_id()
+	var uname: String = GameManager.get_username_for_peer(peer)
+	if uname == "": return
+	var count: int = GameManager.server_recall_marches(uname)
+	if count == 0:
+		_send_error.rpc_id(peer, "Nenhuma frota em campo")
+
 ## Jogador clicou no icone de batalha para entrar/assistir.
 @rpc("any_peer", "reliable")
 func client_request_join_battle(battle_id: int) -> void:
@@ -598,6 +609,14 @@ func request_dismiss_hero() -> void:
 		else: _push_village(local_username)
 	else:
 		client_request_dismiss_hero.rpc_id(1)
+
+func request_recall_marches() -> void:
+	if multiplayer.is_server():
+		var count: int = GameManager.server_recall_marches(local_username)
+		if count == 0: notification_received.emit("Nenhuma frota em campo")
+		else: notification_received.emit("Frotas recuando para casa (%d)" % count)
+	else:
+		client_request_recall_marches.rpc_id(1)
 
 func request_join_battle(battle_id: int) -> void:
 	if multiplayer.is_server():

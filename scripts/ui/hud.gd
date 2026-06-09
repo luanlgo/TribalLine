@@ -77,6 +77,14 @@ func _build_ui() -> void:
 	train_btn.pressed.connect(func() -> void: _toggle_train_panel())
 	bot.add_child(train_btn)
 
+	var recall_btn := Button.new()
+	recall_btn.text = "TRAZER TROPAS"
+	recall_btn.custom_minimum_size = Vector2(130,0)
+	recall_btn.tooltip_text = "Redireciona todas as suas frotas em campo de volta para casa."
+	recall_btn.add_theme_color_override("font_color", Color(0.9, 0.7, 0.3))
+	recall_btn.pressed.connect(func() -> void: NetworkManager.request_recall_marches())
+	bot.add_child(recall_btn)
+
 	# ── Notificacao ────────────────────────────────────────────────────────
 	_notif_lbl = Label.new()
 	_notif_lbl.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)

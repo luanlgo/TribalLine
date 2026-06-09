@@ -366,15 +366,41 @@ func hero_die(vs: VillageState) -> void:
 	var lvl: int = vs.hero.get("level", 1)
 	vs.hero = {"alive": false, "level": lvl}
 
-## Demite o heroi completamente (reseta o campo). Heroi destacado nao pode ser demitido.
+## Demite o heroi completamente (reseta o campo).
+## Se deployed=true mas nenhuma marcha real carrega o heroi, corrige o estado automaticamente.
 func server_dismiss_hero(username: String) -> String:
 	var vs: VillageState = get_village(username)
 	if not vs: return "Sem aldeia"
 	if vs.hero.is_empty(): return "Sem heroi para demitir"
-	if vs.hero.get("deployed", false): return "Heroi em campo — aguarde retornar"
+	if vs.hero.get("deployed", false):
+		# Verifica se existe marcha real com o heroi
+		var hero_march_exists: bool = false
+		for m in marches:
+			if m.get("owner","") == username and m.get("hero", false):
+				hero_march_exists = true
+				break
+		if hero_march_exists:
+			return "Heroi em campo — use 'Trazer Tropas' para recua-lo primeiro"
 	vs.hero = {}
 	village_updated.emit(username)
 	return ""
+
+## Redireciona todas as marchas ativas do jogador de volta para casa.
+func server_recall_marches(username: String) -> int:
+	var count: int = 0
+	var home: Vector2 = Vector2.ZERO
+	var vs: VillageState = get_village(username)
+	if vs: home = village_map_center(vs)
+	for m in marches:
+		if m.get("owner","") != username: continue
+		if m.get("target_kind","") == "home": continue  # ja voltando
+		m["target_kind"] = "home"
+		m["target_user"] = username
+		m["target_id"]   = 0
+		m["tx"] = home.x
+		m["ty"] = home.y
+		count += 1
+	return count
 
 ## Aldeia esta sob protecao de saque (nao pode ser atacada agora)?
 func is_village_protected(vs: VillageState) -> bool:
