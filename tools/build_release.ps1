@@ -48,7 +48,9 @@ if (-not $Launcher) {
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
     Write-Host "==> Exportando o jogo..." -ForegroundColor Cyan
-    & $Godot --headless --path $GameProj --export-release $Preset (Join-Path $outDir $GameExe)
+    # Godot pode retornar exit code != 0 mesmo exportando com sucesso — ignoramos o exit code
+    # e verificamos se o arquivo foi gerado.
+    & $Godot --headless --path $GameProj --export-release $Preset (Join-Path $outDir $GameExe) 2>&1 | Out-Null
     if (-not (Test-Path (Join-Path $outDir $GameExe))) {
         throw "Export falhou: $GameExe nao gerado. Confira o preset '$Preset' e os export templates."
     }
@@ -72,7 +74,7 @@ if ($Launcher) {
     New-Item -ItemType Directory -Force -Path $launcherOut | Out-Null
 
     Write-Host "==> Exportando o launcher..." -ForegroundColor Cyan
-    & $Godot --headless --path $LauncherProj --export-release $Preset (Join-Path $launcherOut $LauncherExe)
+    & $Godot --headless --path $LauncherProj --export-release $Preset (Join-Path $launcherOut $LauncherExe) 2>&1 | Out-Null
     if (-not (Test-Path (Join-Path $launcherOut $LauncherExe))) {
         throw "Export do launcher falhou. Confira o preset '$Preset' no projeto TribalLineClient."
     }
