@@ -24,7 +24,7 @@ if /i not "%CONFIRM%"=="S" (
 )
 
 echo.
-echo ==> Rodando build_release.ps1 -Version %NEW_VERSION% -Publish ...
+echo [publish] Rodando build_release.ps1 -Version %NEW_VERSION% -Publish ...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0build_release.ps1" -Version %NEW_VERSION% -Publish
 if %errorlevel% neq 0 (
     echo.
@@ -34,5 +34,5 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo ==> Release v%NEW_VERSION% publicada com sucesso!
+echo [publish] Release v%NEW_VERSION% publicada com sucesso!
 pause
