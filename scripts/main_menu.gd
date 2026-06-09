@@ -4,7 +4,7 @@ extends Control
 
 const PREFS_PATH: String = "user://login_prefs.cfg"
 const SERVER_HOST: String = "164.163.9.91"
-const SERVER_PORT: int    = 7778
+const SERVER_PORT: int    = 7777
 
 var _username_input: LineEdit
 var _password_input: LineEdit
