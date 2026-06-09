@@ -237,6 +237,25 @@ func server_request_upgrade(username: String, building_idx: int) -> String:
 	village_updated.emit(username)
 	return ""
 
+func server_request_demolish(username: String, building_idx: int) -> String:
+	var vs: VillageState = get_village(username)
+	if not vs or building_idx < 0 or building_idx >= vs.buildings.size():
+		return "Edificio invalido"
+	var entry: Dictionary = vs.buildings[building_idx]
+	if entry.get("construction_end", -1.0) > 0.0:
+		return "Nao e possivel demolir durante construcao"
+	if entry.get("id", "") == "town_hall":
+		return "Nao e possivel demolir o Town Hall"
+	# Devolve 50% dos recursos da construcao (nivel 1)
+	var bd: BuildingData = DataManager.get_building(entry.get("id", ""))
+	if bd:
+		vs.resources["wood"]  = vs.resources.get("wood",  0) + int(bd.base_cost_wood  * 0.5)
+		vs.resources["stone"] = vs.resources.get("stone", 0) + int(bd.base_cost_stone * 0.5)
+		vs.resources["gold"]  = vs.resources.get("gold",  0) + int(bd.base_cost_gold  * 0.5)
+	vs.buildings.remove_at(building_idx)
+	village_updated.emit(username)
+	return ""
+
 func server_request_train(username: String, unit_id: String, count: int) -> String:
 	var vs: VillageState = get_village(username)
 	if not vs: return "Sem aldeia"

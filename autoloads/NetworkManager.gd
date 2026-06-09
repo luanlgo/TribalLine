@@ -260,6 +260,15 @@ func client_request_upgrade(building_idx: int) -> void:
 	_push_village(uname)
 
 @rpc("any_peer", "reliable")
+func client_request_demolish(building_idx: int) -> void:
+	if not multiplayer.is_server(): return
+	var uname: String = GameManager.get_username_for_peer(multiplayer.get_remote_sender_id())
+	if uname == "": return
+	var err: String = GameManager.server_request_demolish(uname, building_idx)
+	if err != "": _send_error.rpc_id(multiplayer.get_remote_sender_id(), err); return
+	_push_village(uname)
+
+@rpc("any_peer", "reliable")
 func client_request_train(unit_id: String, count: int) -> void:
 	if not multiplayer.is_server(): return
 	var uname: String = GameManager.get_username_for_peer(multiplayer.get_remote_sender_id())
@@ -488,6 +497,14 @@ func request_upgrade(building_idx: int) -> void:
 		else: _push_village(local_username)
 	else:
 		client_request_upgrade.rpc_id(1, building_idx)
+
+func request_demolish(building_idx: int) -> void:
+	if multiplayer.is_server():
+		var err := GameManager.server_request_demolish(local_username, building_idx)
+		if err != "": notification_received.emit("Erro: " + err)
+		else: _push_village(local_username)
+	else:
+		client_request_demolish.rpc_id(1, building_idx)
 
 func request_train(unit_id: String, count: int) -> void:
 	if multiplayer.is_server():

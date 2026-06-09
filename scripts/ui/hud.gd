@@ -105,6 +105,8 @@ func _build_ui() -> void:
 		func(uid: String, n: int) -> void: train_requested.emit(uid, n))
 	_build_info.connect("upgrade_requested",
 		func(idx: int) -> void: NetworkManager.request_upgrade(idx))
+	_build_info.connect("demolish_requested",
+		func(idx: int) -> void: NetworkManager.request_demolish(idx))
 	_build_info.connect("buy_food_requested",
 		func(g: int) -> void: NetworkManager.request_buy_food(g))
 	_build_info.connect("nominate_hero_requested",

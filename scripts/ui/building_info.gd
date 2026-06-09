@@ -3,6 +3,7 @@
 extends PanelContainer
 
 signal upgrade_requested(building_idx: int)
+signal demolish_requested(building_idx: int)
 signal buy_food_requested(gold_amount: int)
 signal nominate_hero_requested(unit_id: String)
 
@@ -160,6 +161,18 @@ func show_building(building_idx: int, entry: Dictionary) -> void:
 			_content.add_child(upg_btn)
 		else:
 			_add_lbl("Nivel MAXIMO atingido!", 12, Color.GREEN)
+
+	# Botao de demolir (nao aparece para o Town Hall)
+	var bd_id: String = entry.get("id", "")
+	if bd_id != "town_hall" and not under:
+		_content.add_child(HSeparator.new())
+		var dml_btn := Button.new()
+		dml_btn.text = "DEMOLIR (-50% recursos devolvidos)"
+		dml_btn.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
+		dml_btn.pressed.connect(func() -> void:
+			demolish_requested.emit(_current_idx)
+			visible = false)
+		_content.add_child(dml_btn)
 
 func _add_lbl(text: String, font_size: int = 12, col: Color = Color.WHITE) -> void:
 	var lbl := Label.new()
