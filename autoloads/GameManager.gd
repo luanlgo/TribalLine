@@ -205,6 +205,12 @@ func server_request_build(username: String, building_id: String,
 		return "Town Hall necessaria"
 	if vs.buildings.size() >= GameConfig.MAX_BUILDINGS:
 		return "Limite de %d construcoes atingido" % GameConfig.MAX_BUILDINGS
+	# Limite dinamico: construcoes (exceto a Town Hall) <= nivel da Town Hall.
+	if building_id != "town_hall":
+		var th_lv: int = _get_building_level(vs, "town_hall")
+		var cap: int = th_lv * GameConfig.BUILDINGS_PER_TOWNHALL_LEVEL
+		if _non_townhall_count(vs) >= cap:
+			return "Suba a Town Hall para construir mais (limite: %d)" % cap
 	if not is_grid_free(vs, grid_x, grid_y, bd.grid_size):
 		return "Posicao ocupada"
 	var cost: Dictionary = bd.get_cost(1)
@@ -263,6 +269,10 @@ func server_request_train(username: String, unit_id: String, count: int) -> Stri
 	if not ud: return "Unidade desconhecida"
 	if not _has_building_at_level(vs, ud.required_building, ud.required_building_level):
 		return "Edificio necessario nao disponivel"
+	# Limite de tropas pela Fazenda (conta exercito + fila de treino + tropas em marcha).
+	var cap: int = troop_capacity(vs)
+	if current_troop_count(vs) + count > cap:
+		return "Limite de tropas atingido (%d). Construa/suba fazendas." % cap
 	# Treino nao custa recursos — apenas manutencao de comida (consumo por hora).
 	var last_t: float = _game_time
 	for e in vs.training_queue:
@@ -687,11 +697,20 @@ func _apply_battle_result(m: Dictionary, ctx: Dictionary, outcome: Dictionary) -
 				var march_ref = ctx["march_ref"]
 				if march_ref:
 					marches.erase(march_ref)
+					# Se a marcha destruida levava heroi, ele morre junto.
+					if march_ref.get("hero", false) and def_player != "":
+						var dav_m: VillageState = get_village(def_player)
+						if dav_m: hero_die(dav_m)
 					if def_player != "": village_updated.emit(def_player)
+		var atk_hero_back: bool = m.get("hero", false)
 		if av and m.get("hero", false):
-			hero_add_xp(av, outcome.get("hero_kills", 0))
+			if outcome.get("hero_died", false):
+				hero_die(av)
+				atk_hero_back = false
+			else:
+				hero_add_xp(av, outcome.get("hero_kills", 0))
 		if m in marches: marches.erase(m)
-		_make_return_march(m, atk_surv, loot, m.get("hero", false))
+		_make_return_march(m, atk_surv, loot, atk_hero_back)
 	else:
 		match kind:
 			"village":
@@ -787,6 +806,20 @@ func apply_multi_result(factions: Array, surv: Dictionary, winner_team: int) -> 
 		var dp: String = ctx.get("def_player","")
 		if dp != "":
 			_add_report(dp, _build_report_ffa(def_fac, surv, winner_team, factions, {}, bld_destroyed))
+		# Heroi defensor (se participou): XP se sobreviveu, morre se caiu.
+		var downer: String = def_fac.get("owner", "")
+		var ddata: Dictionary = surv.get(def_fac["team"], {})
+		if downer != "" and ddata.get("has_hero", false):
+			var dav: VillageState = get_village(downer)
+			if dav and dav.hero.get("alive", false):
+				if ddata.get("hero_alive", false):
+					hero_add_xp(dav, ddata.get("hero_kills", 0))
+					# Heroi de aldeia volta disponivel; o de marcha segue com ela.
+					if dkind == "village":
+						dav.hero["deployed"] = false
+				else:
+					hero_die(dav)
+				village_updated.emit(downer)
 
 	# --- Faccoes atacantes: heroi (XP/morte), retorno, saque (so vencedor) ---
 	for f in factions:
@@ -993,6 +1026,48 @@ func _damage_buildings(dv: VillageState) -> int:
 # ---------------------------------------------------------------------------
 # Ticks
 # ---------------------------------------------------------------------------
+## Conta construcoes que nao sao a Town Hall.
+func _non_townhall_count(vs: VillageState) -> int:
+	var n: int = 0
+	for e in vs.buildings:
+		if e.get("id","") != "town_hall": n += 1
+	return n
+
+## Capacidade maxima de tropas = base + soma dos niveis das fazendas * por nivel.
+func troop_capacity(vs: VillageState) -> int:
+	var cap: int = GameConfig.TROOPS_BASE
+	for e in vs.buildings:
+		if e.get("id","") == "farm" and e.get("construction_end",-1.0) < 0.0:
+			cap += e.get("level",0) * GameConfig.TROOPS_PER_FARM_LEVEL
+	return cap
+
+## Tropas atuais: exercito em casa + fila de treino + tropas em marchas do jogador.
+func current_troop_count(vs: VillageState) -> int:
+	var n: int = _army_total(vs.army)
+	n += vs.training_queue.size()
+	for m in marches:
+		if m.get("owner","") == vs.username:
+			n += _army_total(m.get("army", {}))
+	return n
+
+## Producao por SEGUNDO real (ja considerando GAME_SPEED) — para o tooltip do HUD.
+func production_per_sec(vs: VillageState) -> Dictionary:
+	var p: Dictionary = {"wood":0.0, "stone":0.0, "gold":0.0}
+	for e in vs.buildings:
+		if e.get("construction_end",-1.0) > 0.0: continue
+		var bd: BuildingData = DataManager.get_building(e.get("id",""))
+		if not bd: continue
+		var pr: Dictionary = bd.get_production(e.get("level",1))
+		p["wood"]  += pr["wood"]
+		p["stone"] += pr["stone"]
+		p["gold"]  += pr["gold"]
+	# pr e por hora -> por segundo real = /3600 * GAME_SPEED
+	var f: float = GameConfig.GAME_SPEED / 3600.0
+	p["wood"]  *= f
+	p["stone"] *= f
+	p["gold"]  *= f
+	return p
+
 func _tick_production() -> void:
 	for uname in player_villages:
 		# Producao so para jogadores online (ou todos — depende do design)

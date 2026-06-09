@@ -10,7 +10,9 @@ signal battle_left()   # jogador clicou "Sair"
 
 var _battle_id: int = -1
 var _my_hero_net: int = -1
+var _my_team: int = 0
 var _ended: bool = false
+var _last_input_t: float = 0.0   # ultimo input do jogador (para indicar piloto auto)
 
 var _camera: Camera3D
 var _overlay: CanvasLayer
@@ -43,8 +45,16 @@ func _ready() -> void:
 func open(meta: Dictionary) -> void:
 	_battle_id   = meta.get("id", -1)
 	_my_hero_net = meta.get("my_hero_net", -1)
+	_my_team     = meta.get("my_team", 0)
 	_ended = false
-	_status_lbl.text = "%s  ⚔  %s" % [meta.get("attacker",""), meta.get("defender","")]
+	_last_input_t = 0.0
+	# Indica de que lado o jogador esta
+	var side: String = ""
+	if _my_team == 1:
+		side = "  (voce: DEFENSOR)"
+	elif _my_team == 0:
+		side = "  (voce: ATACANTE)"
+	_status_lbl.text = "%s  ⚔  %s%s" % [meta.get("attacker",""), meta.get("defender",""), side]
 	if _camera:
 		_camera.make_current()
 
@@ -86,7 +96,10 @@ func update_state(battle_id: int, snapshot: Array) -> void:
 			_units.erase(net)
 	# Camera segue o heroi do jogador, se houver
 	if _my_hero_net >= 0 and _units.has(_my_hero_net):
-		_hero_lbl.text = "Seu heroi: %d%% vida" % _units[_my_hero_net].get("hp", 100)
+		var auto: bool = (_arena_time - _last_input_t) > 5.0
+		var suffix: String = "  ⚙ PILOTO AUTOMATICO (mova-se para assumir)" if auto else ""
+		_hero_lbl.text = "Seu heroi: %d%% vida%s" % [_units[_my_hero_net].get("hp", 100), suffix]
+		_hero_lbl.modulate = Color(0.6, 0.8, 1.0) if auto else Color(1, 0.9, 0.3)
 	else:
 		_hero_lbl.text = "" if _my_hero_net < 0 else "Heroi caiu!"
 
@@ -94,7 +107,10 @@ func show_result_and_wait() -> void:
 	_ended = true
 	_status_lbl.text = "BATALHA ENCERRADA"
 
+var _arena_time: float = 0.0
+
 func _process(delta: float) -> void:
+	_arena_time += delta
 	# Heartbeat da direcao WASD (reenvia mesmo parado p/ cobrir perda de pacote)
 	if not _ended and _my_hero_net >= 0:
 		_send_acc += delta
@@ -157,6 +173,9 @@ func _recompute_dir() -> void:
 	if _held.get(KEY_A, false): d.x -= 1.0
 	if _held.get(KEY_D, false): d.x += 1.0
 	_move_dir = d
+	# Movimento real conta como input (parado nao reseta o piloto automatico)
+	if d.length() > 0.01:
+		_last_input_t = _arena_time
 	# Envia imediatamente na mudanca (responsividade)
 	NetworkManager.send_hero_input(_battle_id, _move_dir.x, _move_dir.y)
 
@@ -174,6 +193,7 @@ func _try_ability(slot: String) -> void:
 	for a in _abilities:
 		if a.get("key", "") == slot: ab = a; break
 	if ab.is_empty(): return
+	_last_input_t = _arena_time   # usar habilidade conta como input
 	NetworkManager.send_hero_ability(_battle_id, slot)
 	_abil_cd[slot] = ab.get("cd", 5.0)   # previsao local do cooldown
 
@@ -274,12 +294,18 @@ func _spawn_marker(net: int, team: int, kind: int) -> Dictionary:
 		cap.height = 2.2 if hero else 1.6
 		mi.mesh = cap
 		mi.position = Vector3(0, (1.1 if hero else 0.8), 0)
+		var ally: bool = team == _my_team
 		if hero:
-			mat.albedo_color = Color(1.0, 0.85, 0.2) if net == _my_hero_net else Color(0.9, 0.6, 0.9)
+			if net == _my_hero_net:
+				mat.albedo_color = Color(1.0, 0.85, 0.2)   # seu heroi: dourado
+			elif ally:
+				mat.albedo_color = Color(0.3, 0.7, 1.0)    # heroi aliado: azul
+			else:
+				mat.albedo_color = Color(0.95, 0.3, 0.5)   # heroi inimigo: magenta/vermelho
 			mat.emission_enabled = true
 			mat.emission = mat.albedo_color * 0.4
 		else:
-			mat.albedo_color = Color(0.35, 0.8, 0.4) if team == 0 else Color(0.9, 0.35, 0.3)
+			mat.albedo_color = Color(0.35, 0.8, 0.4) if ally else Color(0.9, 0.35, 0.3)
 	mi.material_override = mat
 	node.add_child(mi)
 	var entry := {"node": node, "target_pos": Vector3.ZERO, "is_hero": kind == 1,
@@ -382,6 +408,15 @@ func _setup_overlay() -> void:
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.modulate = Color(0.85, 0.85, 0.85)
 	_overlay.add_child(hint)
+	# Legenda de cores (aliado x inimigo)
+	var legend := Label.new()
+	legend.text = "🟢 Voce/Aliados   🔴 Inimigos   🟡 Seu heroi   🔵 Heroi aliado   🟣 Heroi inimigo"
+	legend.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	legend.offset_top = 44; legend.offset_bottom = 66
+	legend.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	legend.add_theme_font_size_override("font_size", 12)
+	legend.modulate = Color(0.9, 0.9, 0.9)
+	_overlay.add_child(legend)
 
 func _fx_death(pos: Vector3) -> void:
 	var p := CPUParticles3D.new()

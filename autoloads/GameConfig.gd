@@ -47,7 +47,18 @@ const MAX_FLEETS: int = 3
 # -----------------------------------------------------------------------------
 # CONSTRUCOES
 # -----------------------------------------------------------------------------
-const MAX_BUILDINGS: int = 15          # teto de construcoes por aldeia
+const MAX_BUILDINGS: int = 15          # teto absoluto de construcoes por aldeia
+# Limite dinamico: cada nivel do Town Hall libera +1 construcao (alem da propria
+# Town Hall). Nv1 = 1 construcao extra, Nv15 = 15.
+const BUILDINGS_PER_TOWNHALL_LEVEL: int = 1
+
+# -----------------------------------------------------------------------------
+# TROPAS (capacidade pela Fazenda)
+# -----------------------------------------------------------------------------
+# Capacidade de tropas = TROOPS_BASE + (soma dos niveis das fazendas) * por nivel.
+# Ex.: 1 fazenda Nv1 = 50, Nv2 = 100...
+const TROOPS_BASE: int = 0
+const TROOPS_PER_FARM_LEVEL: int = 50
 
 # -----------------------------------------------------------------------------
 # COMBATE (resolucao instantanea no servidor)
@@ -69,6 +80,8 @@ const HERO_ATK_MULT: float = 3.0
 const HERO_DEF_MULT: float = 3.0
 const HERO_PER_LEVEL: float = 0.15   # +15% nos atributos por nivel acima de 1
 const HERO_XP_PER_LEVEL: int = 10    # inimigos mortos para subir 1 nivel
+# Segundos sem input do jogador antes do piloto automatico (bot) assumir o heroi.
+const HERO_IDLE_BOT_SEC: float = 5.0
 
 # -----------------------------------------------------------------------------
 # BATALHA 3D (tempo real, servidor-autoritativa)

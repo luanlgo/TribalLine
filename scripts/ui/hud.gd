@@ -118,6 +118,15 @@ func update_resources(vs: GameManager.VillageState) -> void:
 	_stone_lbl.text = "Pedra: %d"   % vs.resources.get("stone",0)
 	_gold_lbl.text  = "Ouro: %d"    % vs.resources.get("gold",0)
 	_food_lbl.text  = "Comida: %d"  % vs.resources.get("food",0)
+	# Tooltip de producao por segundo (ao passar o mouse)
+	var ps: Dictionary = GameManager.production_per_sec(vs)
+	_wood_lbl.tooltip_text  = "+%.2f madeira/s" % ps.get("wood", 0.0)
+	_stone_lbl.tooltip_text = "+%.2f pedra/s"   % ps.get("stone", 0.0)
+	_gold_lbl.tooltip_text  = "+%.2f ouro/s"    % ps.get("gold", 0.0)
+	# Comida: mostra capacidade de tropas e consumo
+	var cap: int = GameManager.troop_capacity(vs)
+	var cur: int = GameManager.current_troop_count(vs)
+	_food_lbl.tooltip_text  = "Tropas: %d / %d (capacidade pelas fazendas)" % [cur, cap]
 
 func show_notification(msg: String) -> void:
 	_notif_lbl.text     = msg
@@ -171,6 +180,7 @@ func _res_lbl(parent: Control, text: String, col: Color) -> Label:
 	lbl.modulate = col
 	lbl.custom_minimum_size = Vector2(155, 0)
 	lbl.add_theme_font_size_override("font_size", 14)
+	lbl.mouse_filter = Control.MOUSE_FILTER_STOP  # necessario para mostrar tooltip ao passar o mouse
 	parent.add_child(lbl)
 	return lbl
 

@@ -108,7 +108,7 @@ func show_building(building_idx: int, entry: Dictionary) -> void:
 				var gold_needed: int = int(ceil(spin.value / float(GameConfig.FOOD_PER_GOLD)))
 				if gold_needed > 0:
 					buy_food_requested.emit(gold_needed)
-					visible = false)
+					# Painel continua aberto para comprar varias vezes seguidas)
 		# Cabana do Heroi: nomear/ver heroi
 		if bd.category == "hero" and my_vs:
 			_content.add_child(HSeparator.new())

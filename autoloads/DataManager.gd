@@ -49,7 +49,7 @@ func _init_buildings() -> void:
 		"model_path":"res://assets/mining_tower.glb",
 		"model_scale":1.2,"model_y_offset":0.0,"model_y_rotation":0.0})
 	_b({"id":"farm","display_name":"Fazenda",
-		"description":"Alimenta a populacao.",
+		"description":"Aumenta o limite de tropas (+50 por nivel).",
 		"base_hp":200,"base_cost_wood":60,"base_cost_stone":10,
 		"base_build_time":20.0,"grid_size":Vector2i(3,3),
 		"placeholder_color":Color(0.2,0.7,0.2),"placeholder_shape":"box",

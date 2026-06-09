@@ -74,6 +74,20 @@ func _build_roster(b: Dictionary) -> void:
 			b["units"].append(du)
 			dx += 2.0
 			if dx > a - 4.0: dx = 4.0
+	# Heroi defensor: aldeia (heroi em casa, vivo e nao destacado) ou marcha (heroi destacado).
+	var def_owner: String = b.get("defender_user", "")
+	var def_has_hero: bool = false
+	if ctx["kind"] == "village" and ctx["dv"]:
+		var dvh: GameManager.VillageState = ctx["dv"]
+		def_has_hero = dvh.hero.get("alive", false) and not dvh.hero.get("deployed", false)
+	elif ctx["kind"] == "march" and ctx.get("march_ref", null) != null:
+		def_has_hero = ctx["march_ref"].get("hero", false)
+		def_owner = ctx["march_ref"].get("owner", def_owner)
+	if def_has_hero and def_owner != "":
+		var dhero: Dictionary = _make_hero_unit_for(def_owner, 1, a * 0.5, 8.0)
+		if not dhero.is_empty():
+			b["units"].append(dhero)
+
 	# Torres defensoras (atiram)
 	if ctx["kind"] == "village" and ctx["dv"]:
 		var tx: float = 6.0
@@ -119,11 +133,15 @@ func _spawn_faction(b: Dictionary, m: Dictionary, team: int) -> void:
 ## Cria a unidade-heroi de uma marcha (ou {} se nao trouxe heroi).
 func _make_hero_unit(m: Dictionary, team: int, x: float, z: float) -> Dictionary:
 	if not m.get("hero", false): return {}
-	var av: GameManager.VillageState = GameManager.get_village(m["owner"])
+	return _make_hero_unit_for(m["owner"], team, x, z)
+
+## Cria a unidade-heroi a partir do dono (usa o heroi atual da aldeia dele).
+func _make_hero_unit_for(owner: String, team: int, x: float, z: float) -> Dictionary:
+	var av: GameManager.VillageState = GameManager.get_village(owner)
 	if not av: return {}
 	var hs: Dictionary = GameManager.hero_stats(av)
 	if hs.is_empty(): return {}
-	var hu: Dictionary = _make_unit(hs["unit_id"], team, m["owner"], x, z, true)
+	var hu: Dictionary = _make_unit(hs["unit_id"], team, owner, x, z, true)
 	hu["hp"] = hs["hp"]; hu["max_hp"] = hs["hp"]
 	hu["atk"] = hs["attack"]; hu["def"] = hs["defense"]
 	hu["rng"] = hs.get("attack_range", hu["rng"])
@@ -175,6 +193,7 @@ func _make_unit(uid: String, team: int, owner: String,
 		"x": x, "z": z, "cd": 0.0,
 		"is_hero": is_hero, "is_tower": false,
 		"dir_x": 0.0, "dir_z": 0.0,   # direcao de movimento WASD (heroi controlado)
+		"controlled": false, "last_active": -999.0,  # piloto automatico apos inatividade
 		"kills": 0, "alive": true,
 		"abilities": [], "abil_cd": {}, "effects": [], "cast_t": 0.0
 	}
@@ -207,11 +226,21 @@ func join(peer: int, username: String, battle_id: int) -> Dictionary:
 		var u: Dictionary = b["units"][i]
 		if u["is_hero"] and u["owner"] == username and u["alive"]:
 			b["controllers"][peer] = u["net"]
+			u["controlled"] = true
+			u["last_active"] = b["elapsed"]
+	# Descobre o time do espectador (para colorir aliado x inimigo na arena)
+	var my_team: int = -1
+	for u in b["units"]:
+		if u["owner"] == username:
+			my_team = u["team"]; break
+	if my_team < 0 and username == b.get("defender_user", ""):
+		my_team = 1
 	if b["state"] == "pending":
 		b["state"] = "running"
 	return {
 		"id": b["id"], "attacker": b["attacker"], "defender": b.get("def_label",""),
-		"my_hero_net": b["controllers"].get(peer, -1)
+		"my_hero_net": b["controllers"].get(peer, -1),
+		"my_team": my_team
 	}
 
 func leave(peer: int, battle_id: int) -> void:
@@ -230,6 +259,9 @@ func apply_hero_input(peer: int, battle_id: int, dx: float, dz: float) -> void:
 		if u["net"] == hero_net and u["alive"]:
 			u["dir_x"] = clampf(dx, -1.0, 1.0)
 			u["dir_z"] = clampf(dz, -1.0, 1.0)
+			# Movimento real conta como atividade (zero = parado, nao reseta o bot)
+			if absf(u["dir_x"]) > 0.01 or absf(u["dir_z"]) > 0.01:
+				u["last_active"] = b["elapsed"]
 			return
 
 # ---------------------------------------------------------------------------
@@ -290,16 +322,22 @@ func _sim_step(b: Dictionary, dt: float) -> void:
 			tgt = _unit_by_net(b, taunt_net)
 		if tgt.is_empty() or not tgt.get("alive", false):
 			tgt = _nearest_enemy(b, u)
-		# Movimento. Heroi controlado: WASD (direcao). IA / heroi parado: persegue alvo.
+		# Piloto automatico: heroi nao-controlado, ou controlado mas inativo ha >5s.
+		var bot_mode: bool = true
+		if u["is_hero"] and u.get("controlled", false):
+			var idle: float = b["elapsed"] - u.get("last_active", -999.0)
+			bot_mode = idle > GameConfig.HERO_IDLE_BOT_SEC
+		# Movimento. Heroi manual: WASD (parado se sem direcao). IA/bot: persegue alvo.
 		var spd: float = _eff_spd(u)
-		var wasd: bool = u["is_hero"] and taunt_net < 0 \
-			and (absf(u["dir_x"]) > 0.01 or absf(u["dir_z"]) > 0.01)
+		var manual: bool = u["is_hero"] and not bot_mode and taunt_net < 0
 		if spd > 0.0:
-			if wasd:
-				var dv := Vector2(u["dir_x"], u["dir_z"]).normalized()
-				var np := Vector2(u["x"], u["z"]) + dv * spd * dt
-				u["x"] = clampf(np.x, 1.0, a - 1.0)
-				u["z"] = clampf(np.y, 1.0, a - 1.0)
+			if manual:
+				if absf(u["dir_x"]) > 0.01 or absf(u["dir_z"]) > 0.01:
+					var dv := Vector2(u["dir_x"], u["dir_z"]).normalized()
+					var np := Vector2(u["x"], u["z"]) + dv * spd * dt
+					u["x"] = clampf(np.x, 1.0, a - 1.0)
+					u["z"] = clampf(np.y, 1.0, a - 1.0)
+				# sem direcao = parado (controle manual)
 			elif not tgt.is_empty():
 				var cur := Vector2(u["x"], u["z"])
 				var wp := Vector2(tgt["x"], tgt["z"])
@@ -316,6 +354,20 @@ func _sim_step(b: Dictionary, dt: float) -> void:
 				var raw: float = max(1.0, _eff_atk(u) - tgt["def"] * 0.3)
 				_deal_damage(b, u["net"], tgt, raw)
 				u["cd"] = 1.0 / max(0.1, _eff_atk_spd(u))
+		# Bot tambem usa habilidades (uma por passo, na mais proxima)
+		if u["is_hero"] and bot_mode and not tgt.is_empty() and not u["abilities"].is_empty():
+			_bot_cast(b, u)
+
+## Bot dispara a primeira habilidade pronta do heroi (mira automatica interna).
+func _bot_cast(b: Dictionary, u: Dictionary) -> void:
+	for ab in u["abilities"]:
+		var slot: String = ab.get("key", "")
+		if slot == "": continue
+		if u["abil_cd"].get(slot, 0.0) > 0.0: continue
+		_resolve_ability(b, u, ab)
+		u["abil_cd"][slot] = ab.get("cd", 5.0)
+		u["cast_t"] = 0.4
+		return   # uma por passo
 
 # ---------------------------------------------------------------------------
 # Efeitos (buff/block/stun/mark/dot/taunt) e dano
@@ -402,6 +454,7 @@ func apply_hero_ability(peer: int, battle_id: int, slot: String) -> void:
 			ab = cand; break
 	if ab.is_empty(): return
 	if u["abil_cd"].get(slot, 0.0) > 0.0: return   # em recarga
+	u["last_active"] = b["elapsed"]   # usar habilidade conta como atividade
 	_resolve_ability(b, u, ab)
 	u["abil_cd"][slot] = ab.get("cd", 5.0)
 	u["cast_t"] = 0.4   # flag visual de conjuracao
