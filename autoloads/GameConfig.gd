@@ -66,8 +66,13 @@ const TROOPS_PER_FARM_LEVEL: int = 50
 # Defesa extra que muralha e torre dao por nivel (somada ao poder defensivo).
 const WALL_DEF_PER_LEVEL: float  = 40.0
 const TOWER_DEF_PER_LEVEL: float = 25.0
-# Fracao do HP de uma construcao destruida quando o atacante vence (0..1).
-const BUILDING_DMG_FACTOR: float = 0.5
+# Fracao do HP de uma construcao danificada quando o atacante vence (0..1).
+# Baixo = mais ataques para destruir (mais dificil dizimar numa investida so).
+const BUILDING_DMG_FACTOR: float = 0.15
+# Protecao contra saque: apos uma aldeia ser saqueada, fica imune a ataques por
+# este tempo (em SEGUNDOS DE JOGO). Evita ser atacado em loop sem chance de reagir.
+# Com GAME_SPEED=5, 3600s de jogo = ~12 min reais.
+const RAID_PROTECTION_SEC: float = 3600.0
 const MAX_REPORTS: int = 20            # quantos relatorios guardar por jogador
 
 # -----------------------------------------------------------------------------

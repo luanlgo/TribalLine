@@ -64,6 +64,8 @@ class VillageState:
 	var npc_level_unlocked: int = 1
 	# Heroi: {} = nenhum; senao {unit_id, level, xp, alive, deployed}
 	var hero: Dictionary = {}
+	# Tempo de jogo ate o qual a aldeia esta protegida de ataques (0 = sem protecao)
+	var protection_until: float = 0.0
 
 	func to_dict() -> Dictionary:
 		return {
@@ -74,7 +76,8 @@ class VillageState:
 			"map_pos_x": map_pos_x, "map_pos_y": map_pos_y,
 			"reports": reports.duplicate(true),
 			"npc_level_unlocked": npc_level_unlocked,
-			"hero": hero.duplicate(true)
+			"hero": hero.duplicate(true),
+			"protection_until": protection_until
 		}
 
 	static func from_dict(d: Dictionary) -> VillageState:
@@ -94,6 +97,7 @@ class VillageState:
 		vs.reports        = d.get("reports",[])
 		vs.npc_level_unlocked = int(d.get("npc_level_unlocked",1))
 		vs.hero           = d.get("hero",{})
+		vs.protection_until = float(d.get("protection_until", 0.0))
 		return vs
 
 # ---------------------------------------------------------------------------
@@ -362,6 +366,15 @@ func hero_die(vs: VillageState) -> void:
 	var lvl: int = vs.hero.get("level", 1)
 	vs.hero = {"alive": false, "level": lvl}
 
+## Aldeia esta sob protecao de saque (nao pode ser atacada agora)?
+func is_village_protected(vs: VillageState) -> bool:
+	return vs != null and vs.protection_until > _game_time
+
+## Concede protecao de saque apos a aldeia ser saqueada.
+func _grant_protection(vs: VillageState) -> void:
+	if vs:
+		vs.protection_until = _game_time + GameConfig.RAID_PROTECTION_SEC
+
 # ---------------------------------------------------------------------------
 # Marchas (tropas em movimento no mapa mundial)
 # ---------------------------------------------------------------------------
@@ -408,6 +421,8 @@ func server_send_march(attacker_username: String, army: Dictionary,
 		"village":
 			var dv: VillageState = get_village(target_user)
 			if not dv: return "Alvo invalido"
+			if is_village_protected(dv):
+				return "Essa aldeia esta sob protecao apos um ataque recente"
 			tgt = village_map_center(dv)
 		"npc":
 			var npc = _find_npc(target_id)
@@ -527,7 +542,8 @@ func _process_arrival(m: Dictionary) -> void:
 			_arrive_home(m)
 		"village":
 			var defn: String = m.get("target_user","")
-			if defn == m["owner"] or not player_villages.has(defn):
+			if defn == m["owner"] or not player_villages.has(defn) \
+					or is_village_protected(get_village(defn)):
 				_park_march(m)
 			else:
 				_begin_or_resolve(m)
@@ -685,6 +701,7 @@ func _apply_battle_result(m: Dictionary, ctx: Dictionary, outcome: Dictionary) -
 					loot = _take_loot(dv, _army_loot_capacity(atk_surv))
 					dv.army = {}
 					bld_destroyed = _damage_buildings(dv)
+					_grant_protection(dv)
 					village_updated.emit(def_player)
 			"npc":
 				var npc_ref = ctx["npc_ref"]
@@ -777,6 +794,7 @@ func apply_multi_result(factions: Array, surv: Dictionary, winner_team: int) -> 
 						if cap > 0: loot = _take_loot(dv, cap)
 						dv.army = {}
 						bld_destroyed = _damage_buildings(dv)
+						_grant_protection(dv)
 						if ctx.get("def_player","") != "":
 							village_updated.emit(ctx["def_player"])
 				"npc":

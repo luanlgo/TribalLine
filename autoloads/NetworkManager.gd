@@ -14,6 +14,7 @@ signal game_started()
 signal login_result(success: bool, message: String)
 signal village_state_received(username: String, state_dict: Dictionary)
 signal notification_received(msg: String)
+signal attack_alert(msg: String)   # alerta destacado: voce esta sob ataque
 signal local_resources_updated()  # emitido no cliente quando recursos chegam
 # Batalha 3D (cliente)
 signal battle_open(meta: Dictionary)       # servidor mandou abrir a arena
@@ -453,6 +454,18 @@ func _send_error(msg: String) -> void:
 @rpc("authority", "reliable")
 func _broadcast_notif(msg: String) -> void:
 	notification_received.emit(msg)
+
+## Alerta destacado de ataque, enviado ao defensor especifico.
+@rpc("authority", "reliable")
+func _attack_alert(msg: String) -> void:
+	attack_alert.emit(msg)
+
+## (Servidor) Envia um alerta de ataque a um jogador especifico, se estiver online.
+func alert_player(username: String, msg: String) -> void:
+	if not multiplayer.is_server(): return
+	var peer: int = _get_peer_for_username(username)
+	if peer > 0:
+		_attack_alert.rpc_id(peer, msg)
 
 ## Sincroniza os acampamentos NPC visiveis para este cliente.
 @rpc("authority", "unreliable")

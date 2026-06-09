@@ -56,6 +56,11 @@ func begin_battle(m: Dictionary) -> void:
 	set_process(true)
 	GameManager.notification_received.emit(
 		"Batalha! %s atacando %s — entre no mapa!" % [b["attacker"], b["def_label"]])
+	# Alerta destacado direto para o defensor (se for um jogador online).
+	var dfu: String = b.get("defender_user", "")
+	if dfu != "":
+		NetworkManager.alert_player(dfu,
+			"%s esta atacando %s! Entre no Mapa Mundial para defender." % [b["attacker"], b["def_label"]])
 
 ## Monta as unidades iniciais (atacante embaixo, defensor em cima).
 func _build_roster(b: Dictionary) -> void:
@@ -176,6 +181,10 @@ func reinforce(b: Dictionary, m: Dictionary) -> void:
 	_spawn_faction(b, m, team)
 	GameManager.notification_received.emit(
 		"Reforco! %s entrou na batalha de %s." % [m["owner"], b["def_label"]])
+	var dfu2: String = b.get("defender_user", "")
+	if dfu2 != "" and dfu2 != m["owner"]:
+		NetworkManager.alert_player(dfu2,
+			"Reforco inimigo! %s entrou na batalha contra %s." % [m["owner"], b["def_label"]])
 
 func _make_unit(uid: String, team: int, owner: String,
 		x: float, z: float, is_hero: bool) -> Dictionary:

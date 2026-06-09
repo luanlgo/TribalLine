@@ -13,6 +13,9 @@ var _gold_lbl: Label
 var _food_lbl: Label
 var _notif_lbl: Label
 var _notif_timer: float = 0.0
+var _alert_panel: Panel
+var _alert_lbl: Label
+var _alert_timer: float = 0.0
 
 var _build_menu: Control
 var _train_panel: Control
@@ -86,6 +89,33 @@ func _build_ui() -> void:
 	_notif_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_notif_lbl)
 
+	# ── Alerta de ataque (banner vermelho destacado, clique para fechar) ────
+	_alert_panel = Panel.new()
+	_alert_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_alert_panel.offset_top = 90; _alert_panel.offset_bottom = 140
+	_alert_panel.offset_left = -340; _alert_panel.offset_right = 340
+	var alert_style := StyleBoxFlat.new()
+	alert_style.bg_color = Color(0.6, 0.08, 0.08, 0.95)
+	alert_style.set_border_width_all(3)
+	alert_style.border_color = Color(1.0, 0.85, 0.2)
+	alert_style.set_corner_radius_all(6)
+	_alert_panel.add_theme_stylebox_override("panel", alert_style)
+	_alert_panel.visible = false
+	_alert_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_alert_panel.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton and ev.pressed:
+			_alert_panel.visible = false
+			_alert_timer = 0.0)
+	add_child(_alert_panel)
+	_alert_lbl = Label.new()
+	_alert_lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_alert_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_alert_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_alert_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_alert_lbl.add_theme_font_size_override("font_size", 16)
+	_alert_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_alert_panel.add_child(_alert_lbl)
+
 	# ── Paineis (ocultos) ──────────────────────────────────────────────────
 	_build_menu  = _make_panel("res://scripts/ui/building_menu.gd")
 	_train_panel = _make_panel("res://scripts/ui/training_panel.gd")
@@ -133,6 +163,12 @@ func show_notification(msg: String) -> void:
 	_notif_lbl.modulate = Color(1.0,1.0,0.2,1.0)
 	_notif_timer = 4.5
 
+## Alerta destacado (sob ataque): banner vermelho que fica ~20s ou ate clicar.
+func show_attack_alert(msg: String) -> void:
+	_alert_lbl.text = "⚔ %s" % msg
+	_alert_panel.visible = true
+	_alert_timer = 20.0
+
 func toggle_build_menu() -> void:
 	_toggle_build_menu()
 
@@ -161,6 +197,12 @@ func _process(delta: float) -> void:
 	if _notif_timer > 0.0:
 		_notif_timer -= delta
 		_notif_lbl.modulate.a = clampf(_notif_timer, 0.0, 1.0)
+	if _alert_timer > 0.0:
+		_alert_timer -= delta
+		# Pisca o banner para chamar atencao
+		_alert_panel.modulate.a = 0.6 + 0.4 * absf(sin(_alert_timer * 4.0))
+		if _alert_timer <= 0.0:
+			_alert_panel.visible = false
 
 # ---------------------------------------------------------------------------
 func _make_panel(script_path: String) -> Control:

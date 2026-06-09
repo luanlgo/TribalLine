@@ -49,6 +49,7 @@ func _ready() -> void:
 
 	NetworkManager.village_state_received.connect(_on_village_state)
 	NetworkManager.notification_received.connect(_on_notification)
+	NetworkManager.attack_alert.connect(_on_attack_alert)
 	NetworkManager.local_resources_updated.connect(_sync_hud_from_server)
 	NetworkManager.battle_open.connect(_on_battle_open)
 	NetworkManager.battle_state.connect(_on_battle_state)
@@ -270,6 +271,10 @@ func _on_village_state(username: String, state_dict: Dictionary) -> void:
 
 func _on_notification(msg: String) -> void:
 	_hud.show_notification(msg)
+
+func _on_attack_alert(msg: String) -> void:
+	if _hud and _hud.has_method("show_attack_alert"):
+		_hud.show_attack_alert(msg)
 
 func _on_build_btn() -> void:
 	_hud.toggle_build_menu()
