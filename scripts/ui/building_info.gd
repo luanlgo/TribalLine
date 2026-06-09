@@ -146,14 +146,13 @@ func show_building(building_idx: int, entry: Dictionary) -> void:
 					_content.add_child(nb)
 				if not any_unit:
 					_add_lbl("Treine tropas primeiro.", 10, Color(0.7,0.7,0.7))
-			# Botao DEMITIR HEROI (visivel quando ha heroi, desabilitado se em campo)
+			# Botao DEMITIR HEROI (visivel quando ha heroi; servidor valida se esta em campo de verdade)
 			if not my_vs.hero.is_empty():
 				var dis_btn := Button.new()
 				dis_btn.text = "DEMITIR HEROI"
 				dis_btn.add_theme_color_override("font_color", Color(1.0, 0.5, 0.2))
 				dis_btn.add_theme_font_size_override("font_size", 11)
-				dis_btn.disabled = my_vs.hero.get("deployed", false)
-				dis_btn.tooltip_text = "Remove o heroi atual. O nivel e preservado para o proximo." if not dis_btn.disabled else "Heroi em campo — aguarde retornar."
+				dis_btn.tooltip_text = "Remove o heroi atual. O nivel e preservado para o proximo.\nSe o heroi estiver em campo o servidor ira bloquear."
 				dis_btn.pressed.connect(func() -> void:
 					dismiss_hero_requested.emit()
 					visible = false
