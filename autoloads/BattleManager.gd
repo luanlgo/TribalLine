@@ -69,16 +69,19 @@ func _build_roster(b: Dictionary) -> void:
 	var a: float = GameConfig.ARENA_SIZE
 	# Atacante original (time 0) usa o spawn de faccao
 	_spawn_faction(b, m, 0)
-	# Defensores (exercito) — bonus de muralha vira HP extra
+	# Defensores (exercito) — bonus de muralha vira HP extra. Formacao em grade.
 	var wall_factor: float = 1.0 + ctx.get("wall_bonus", 0.0) / 200.0
-	var dx: float = 4.0
+	var def_uids: Array = []
 	for uid in ctx["def_army"]:
 		for _i in range(ctx["def_army"][uid]):
-			var du: Dictionary = _make_unit(uid, 1, b.get("defender_user",""), dx, 6.0, false)
-			du["hp"] *= wall_factor; du["max_hp"] *= wall_factor
-			b["units"].append(du)
-			dx += 2.0
-			if dx > a - 4.0: dx = 4.0
+			def_uids.append(uid)
+	var def_anchor: Vector2 = _faction_anchor(1, a)
+	var def_pos: Array = _formation_positions(def_uids.size(), def_anchor)
+	for i in range(def_uids.size()):
+		var du: Dictionary = _make_unit(def_uids[i], 1, b.get("defender_user",""),
+			def_pos[i].x, def_pos[i].y, false)
+		du["hp"] *= wall_factor; du["max_hp"] *= wall_factor
+		b["units"].append(du)
 	# Heroi defensor: aldeia (heroi em casa, vivo e nao destacado) ou marcha (heroi destacado).
 	var def_owner: String = b.get("defender_user", "")
 	var def_has_hero: bool = false
@@ -120,20 +123,42 @@ func _faction_anchor(team: int, a: float) -> Vector2:
 		5: return Vector2(a - 8.0, a - 8.0)    # canto oposto
 		_: return Vector2(randf_range(6.0, a - 6.0), randf_range(6.0, a - 6.0))
 
-## Spawna o exercito (+heroi) de uma marcha como uma faccao 'team'.
+## Spawna o exercito (+heroi) de uma marcha como uma faccao 'team', em formacao de grade.
 func _spawn_faction(b: Dictionary, m: Dictionary, team: int) -> void:
 	var a: float = GameConfig.ARENA_SIZE
 	var anchor: Vector2 = _faction_anchor(team, a)
-	var x: float = anchor.x - 6.0
+	var uids: Array = []
 	for uid in m["army"]:
 		for _i in range(m["army"][uid]):
-			b["units"].append(_make_unit(uid, team, m["owner"],
-				clampf(x, 2.0, a - 2.0), anchor.y, false))
-			x += 2.0
-			if x > anchor.x + 6.0: x = anchor.x - 6.0
-	var hero: Dictionary = _make_hero_unit(m, team, anchor.x, anchor.y - 2.0)
+			uids.append(uid)
+	var pos: Array = _formation_positions(uids.size(), anchor)
+	for i in range(uids.size()):
+		b["units"].append(_make_unit(uids[i], team, m["owner"], pos[i].x, pos[i].y, false))
+	var hero: Dictionary = _make_hero_unit(m, team, anchor.x, anchor.y)
 	if not hero.is_empty():
 		b["units"].append(hero)
+
+## Distribui 'count' posicoes numa grade compacta centrada em 'anchor',
+## com as fileiras recuando para longe do centro da arena (cada faccao para o seu lado).
+func _formation_positions(count: int, anchor: Vector2) -> Array:
+	var positions: Array = []
+	if count <= 0: return positions
+	var a: float = GameConfig.ARENA_SIZE
+	var center := Vector2(a * 0.5, a * 0.5)
+	var away := anchor - center
+	if away.length() < 0.01: away = Vector2(0.0, 1.0)
+	away = away.normalized()
+	var side := Vector2(-away.y, away.x)   # eixo perpendicular = largura da formacao
+	var spacing: float = 1.3
+	var cols: int = clampi(int(ceil(sqrt(float(count)))), 1, 40)
+	var half: float = (cols - 1) * 0.5
+	for i in range(count):
+		var col: int = i % cols
+		var row: int = int(i / cols)
+		var off := side * ((col - half) * spacing) + away * (row * spacing)
+		var p := anchor + off
+		positions.append(Vector2(clampf(p.x, 1.5, a - 1.5), clampf(p.y, 1.5, a - 1.5)))
+	return positions
 
 ## Cria a unidade-heroi de uma marcha (ou {} se nao trouxe heroi).
 func _make_hero_unit(m: Dictionary, team: int, x: float, z: float) -> Dictionary:
@@ -204,6 +229,7 @@ func _make_unit(uid: String, team: int, owner: String,
 		"dir_x": 0.0, "dir_z": 0.0,   # direcao de movimento WASD (heroi controlado)
 		"controlled": false, "last_active": -999.0,  # piloto automatico apos inatividade
 		"kills": 0, "alive": true,
+		"target_net": -1,   # alvo em cache (evita rebuscar inimigo todo frame)
 		"abilities": [], "abil_cd": {}, "effects": [], "cast_t": 0.0
 	}
 
@@ -231,12 +257,14 @@ func join(peer: int, username: String, battle_id: int) -> Dictionary:
 	if not b["viewers"].has(peer):
 		b["viewers"].append(peer)
 	# Registra controle do heroi do jogador, se existir nesta batalha
+	var my_hero_uid: String = ""
 	for i in range(b["units"].size()):
 		var u: Dictionary = b["units"][i]
 		if u["is_hero"] and u["owner"] == username and u["alive"]:
 			b["controllers"][peer] = u["net"]
 			u["controlled"] = true
 			u["last_active"] = b["elapsed"]
+			my_hero_uid = u["uid"]
 	# Descobre o time do espectador (para colorir aliado x inimigo na arena)
 	var my_team: int = -1
 	for u in b["units"]:
@@ -249,6 +277,7 @@ func join(peer: int, username: String, battle_id: int) -> Dictionary:
 	return {
 		"id": b["id"], "attacker": b["attacker"], "defender": b.get("def_label",""),
 		"my_hero_net": b["controllers"].get(peer, -1),
+		"my_hero_uid": my_hero_uid,
 		"my_team": my_team
 	}
 
@@ -310,6 +339,16 @@ func _process(delta: float) -> void:
 
 func _sim_step(b: Dictionary, dt: float) -> void:
 	var a: float = GameConfig.ARENA_SIZE
+	# --- Passo 0: indices para busca rapida de alvo (montar O(n); consultar ~O(1)) ---
+	var net_map: Dictionary = {}
+	var grid: Dictionary = {}
+	for u in b["units"]:
+		net_map[u["net"]] = u
+		if not u["alive"]: continue
+		var key: int = _cell_key(u["x"], u["z"])
+		if not grid.has(key): grid[key] = []
+		grid[key].append(u)
+
 	# --- Passo 1: tica cooldowns/efeitos/DoT/cast ---
 	for u in b["units"]:
 		if not u["alive"]: continue
@@ -324,13 +363,20 @@ func _sim_step(b: Dictionary, dt: float) -> void:
 	for u in b["units"]:
 		if not u["alive"]: continue
 		if _is_stunned(u): continue   # atordoado nao age
-		# Alvo: taunt forca; senao o inimigo mais proximo (auto-ataque)
+		# Alvo: taunt forca; senao alvo em cache; senao busca no grid espacial.
 		var tgt: Dictionary = {}
 		var taunt_net: int = _taunt_net(u)
 		if taunt_net >= 0:
-			tgt = _unit_by_net(b, taunt_net)
+			tgt = net_map.get(taunt_net, {})
+		else:
+			var cached: int = u.get("target_net", -1)
+			if cached >= 0:
+				var ct: Dictionary = net_map.get(cached, {})
+				if not ct.is_empty() and ct.get("alive", false) and ct["team"] != u["team"]:
+					tgt = ct
 		if tgt.is_empty() or not tgt.get("alive", false):
-			tgt = _nearest_enemy(b, u)
+			tgt = _nearest_enemy_grid(grid, u)
+			u["target_net"] = tgt.get("net", -1) if not tgt.is_empty() else -1
 		# Piloto automatico: heroi nao-controlado, ou controlado mas inativo ha >5s.
 		var bot_mode: bool = true
 		if u["is_hero"] and u.get("controlled", false):
@@ -574,6 +620,44 @@ func _nearest_enemy(b: Dictionary, u: Dictionary) -> Dictionary:
 			best_d = d; best = o
 	return best
 
+const _GRID_CELL: float = 6.0   # lado da celula do grid espacial (metros)
+
+func _cell_key(x: float, z: float) -> int:
+	return int(x / _GRID_CELL) * 100000 + int(z / _GRID_CELL)
+
+## Inimigo mais proximo usando o grid espacial: varre aneis de celulas a partir
+## da celula da unidade, expandindo ate achar e confirmar (1 anel extra). ~O(1) tipico.
+func _nearest_enemy_grid(grid: Dictionary, u: Dictionary) -> Dictionary:
+	var a: float = GameConfig.ARENA_SIZE
+	var ucx: int = int(u["x"] / _GRID_CELL)
+	var ucz: int = int(u["z"] / _GRID_CELL)
+	var max_ring: int = int(a / _GRID_CELL) + 1
+	var ux: float = u["x"]
+	var uz: float = u["z"]
+	var uteam: int = u["team"]
+	var best: Dictionary = {}
+	var best_d: float = INF
+	var found_ring: int = -1
+	var ring: int = 0
+	while ring <= max_ring:
+		for dx in range(-ring, ring + 1):
+			for dz in range(-ring, ring + 1):
+				if maxi(absi(dx), absi(dz)) != ring: continue   # so a borda do anel
+				var cell: Array = grid.get((ucx + dx) * 100000 + (ucz + dz), [])
+				for o in cell:
+					if not o["alive"] or o["team"] == uteam: continue
+					var ddx: float = ux - o["x"]
+					var ddz: float = uz - o["z"]
+					var d: float = ddx * ddx + ddz * ddz
+					if d < best_d:
+						best_d = d; best = o
+		if not best.is_empty() and found_ring < 0:
+			found_ring = ring
+		if found_ring >= 0 and ring >= found_ring + 1:
+			break   # confirma com 1 anel extra (celulas diagonais podem ser mais perto)
+		ring += 1
+	return best
+
 ## Acaba quando ate 1 time tem unidades (nao-torre) vivas.
 func _battle_over(b: Dictionary) -> bool:
 	var teams: Dictionary = {}
@@ -648,19 +732,22 @@ func icons() -> Array:
 		})
 	return r
 
-## Snapshot do estado das unidades para os espectadores de uma batalha.
-func snapshot(battle_id: int) -> Array:
+## Snapshot do estado das unidades para os espectadores (flat, stride 7).
+## Por unidade: [net, x*10, z*10, hp_pct, team, kind(0/1heroi/2torre), flags].
+## PackedInt32Array serializa muito mais barato que Array de Arrays (centenas de unidades).
+func snapshot(battle_id: int) -> PackedInt32Array:
+	var arr: PackedInt32Array = PackedInt32Array()
 	var b: Dictionary = find_battle(battle_id)
-	if b.is_empty(): return []
-	var arr: Array = []
+	if b.is_empty(): return arr
 	for u in b["units"]:
 		if not u["alive"]: continue
-		arr.append([
-			u["net"], int(round(u["x"] * 10.0)), int(round(u["z"] * 10.0)),
-			int(clampf(u["hp"] / max(1.0, u["max_hp"]) * 100.0, 0.0, 100.0)),
-			u["team"], (1 if u["is_hero"] else (2 if u["is_tower"] else 0)), u["uid"],
-			_unit_flags(u)
-		])
+		arr.append(u["net"])
+		arr.append(int(round(u["x"] * 10.0)))
+		arr.append(int(round(u["z"] * 10.0)))
+		arr.append(int(clampf(u["hp"] / max(1.0, u["max_hp"]) * 100.0, 0.0, 100.0)))
+		arr.append(u["team"])
+		arr.append(1 if u["is_hero"] else (2 if u["is_tower"] else 0))
+		arr.append(_unit_flags(u))
 	return arr
 
 ## Bitmask de estado para o cliente desenhar: 1=block 2=buff 4=stun 8=conjurando.

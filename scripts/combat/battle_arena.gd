@@ -18,7 +18,14 @@ var _camera: Camera3D
 var _overlay: CanvasLayer
 var _status_lbl: Label
 var _hero_lbl: Label
-var _units: Dictionary = {}   # net_id -> {node, target_pos, is_hero, team, mat}
+var _units: Dictionary = {}   # net_id -> {node, target_pos, is_hero, team, mat}  (so heroi/torre)
+
+# Soldados (kind 0) renderizados via MultiMesh — 1 draw call p/ centenas de unidades.
+var _mm: MultiMesh
+var _mm_inst: MultiMeshInstance3D
+var _soldiers: Array = []          # [{net, pos: Vector3, target: Vector3, color: Color}]
+var _soldier_idx: Dictionary = {}  # net -> indice em _soldiers
+const _MAX_SOLDIERS: int = 4096
 
 # Barra de habilidades (cliente preve cooldown — conhece os valores do kit)
 var _abilities: Array = []                 # kit do heroi controlado
@@ -39,7 +46,26 @@ func _ready() -> void:
 	_setup_camera()
 	_setup_lighting()
 	_setup_ground()
+	_setup_soldiers_multimesh()
 	_setup_overlay()
+
+## Cria o MultiMesh dos soldados (cor por instancia: aliado=verde, inimigo=vermelho).
+func _setup_soldiers_multimesh() -> void:
+	var cap := CapsuleMesh.new()
+	cap.radius = 0.32
+	cap.height = 1.6
+	_mm = MultiMesh.new()
+	_mm.transform_format = MultiMesh.TRANSFORM_3D
+	_mm.use_colors = true
+	_mm.mesh = cap
+	_mm.instance_count = _MAX_SOLDIERS
+	_mm.visible_instance_count = 0
+	_mm_inst = MultiMeshInstance3D.new()
+	_mm_inst.multimesh = _mm
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true   # usa a cor por instancia como albedo
+	_mm_inst.material_override = mat
+	add_child(_mm_inst)
 
 # ---------------------------------------------------------------------------
 func open(meta: Dictionary) -> void:
@@ -55,46 +81,79 @@ func open(meta: Dictionary) -> void:
 	elif _my_team == 0:
 		side = "  (voce: ATACANTE)"
 	_status_lbl.text = "%s  ⚔  %s%s" % [meta.get("attacker",""), meta.get("defender",""), side]
+	# Barra de habilidades do heroi controlado (uid vem no meta agora, nao no snapshot)
+	var huid: String = meta.get("my_hero_uid", "")
+	if huid != "" and _hero_uid.is_empty():
+		_hero_uid = huid
+		_build_ability_bar(huid)
 	if _camera:
 		_camera.make_current()
 
-func update_state(battle_id: int, snapshot: Array) -> void:
+func update_state(battle_id: int, snapshot: PackedInt32Array) -> void:
 	if battle_id != _battle_id or _ended:
 		return
-	var seen: Dictionary = {}
-	for row in snapshot:
-		# [net, xi, zi, hp_pct, team, kind(0/1heroi/2torre), uid, flags]
-		var net: int   = row[0]
-		var x: float   = row[1] / 10.0
-		var z: float   = row[2] / 10.0
-		var hp_pct: int = row[3]
-		var team: int  = row[4]
-		var kind: int  = row[5]
-		var uid: String = row[6] if row.size() > 6 else ""
-		var flags: int = row[7] if row.size() > 7 else 0
-		seen[net] = true
-		# Monta a barra de skills quando reconhecemos o heroi controlado
-		if net == _my_hero_net and _hero_uid.is_empty() and uid != "":
-			_hero_uid = uid
-			_build_ability_bar(uid)
-		var u: Dictionary = _units.get(net, {})
-		if u.is_empty():
-			u = _spawn_marker(net, team, kind)
-			_units[net] = u
-		u["target_pos"] = Vector3(x, 0.0, z)
-		u["hp"] = hp_pct
-		_apply_flags(u, flags)
-		if u.get("is_hero", false) and u.has("hp_fill"):
-			_update_hp_bar(u, hp_pct)
-	# Remove unidades que sairam do snapshot (morreram)
+	var seen_soldiers: Dictionary = {}
+	var seen_markers: Dictionary = {}
+	var n: int = snapshot.size()
+	var i: int = 0
+	# Stride 7: [net, x*10, z*10, hp_pct, team, kind(0/1heroi/2torre), flags]
+	while i + 6 < n:
+		var net: int    = snapshot[i]
+		var x: float    = snapshot[i + 1] / 10.0
+		var z: float    = snapshot[i + 2] / 10.0
+		var hp_pct: int = snapshot[i + 3]
+		var team: int   = snapshot[i + 4]
+		var kind: int   = snapshot[i + 5]
+		var flags: int  = snapshot[i + 6]
+		i += 7
+		if kind == 0:
+			# Soldado: instancia no MultiMesh
+			seen_soldiers[net] = true
+			var idx: int = _soldier_idx.get(net, -1)
+			if idx < 0:
+				var col: Color = Color(0.35, 0.8, 0.4) if team == _my_team else Color(0.9, 0.35, 0.3)
+				_soldiers.append({"net": net, "pos": Vector3(x, 0.8, z),
+					"target": Vector3(x, 0.8, z), "color": col})
+				_soldier_idx[net] = _soldiers.size() - 1
+			else:
+				_soldiers[idx]["target"] = Vector3(x, 0.8, z)
+		else:
+			# Heroi/torre: marcador individual (poucos; tem rotulo/barra de vida)
+			seen_markers[net] = true
+			var u: Dictionary = _units.get(net, {})
+			if u.is_empty():
+				u = _spawn_marker(net, team, kind)
+				_units[net] = u
+			u["target_pos"] = Vector3(x, 0.0, z)
+			u["hp"] = hp_pct
+			_apply_flags(u, flags)
+			if u.get("is_hero", false) and u.has("hp_fill"):
+				_update_hp_bar(u, hp_pct)
+	# Soldados que sairam do snapshot (morreram) — remove com swap-back (O(1))
+	var dead: Array = []
+	for net in _soldier_idx.keys():
+		if not seen_soldiers.has(net):
+			dead.append(net)
+	var fx_budget: int = 10   # limita particulas/frame para nao travar em mortes em massa
+	for net in dead:
+		var idx: int = _soldier_idx[net]
+		if fx_budget > 0:
+			_fx_death(_soldiers[idx]["pos"]); fx_budget -= 1
+		var last: int = _soldiers.size() - 1
+		if idx != last:
+			_soldiers[idx] = _soldiers[last]
+			_soldier_idx[_soldiers[idx]["net"]] = idx
+		_soldiers.pop_back()
+		_soldier_idx.erase(net)
+	# Marcadores (heroi/torre) que morreram
 	for net in _units.keys():
-		if not seen.has(net):
+		if not seen_markers.has(net):
 			var node: Node3D = _units[net]["node"]
 			if is_instance_valid(node):
 				_fx_death(node.global_position)
 				node.queue_free()
 			_units.erase(net)
-	# Camera segue o heroi do jogador, se houver
+	# HUD do heroi do jogador
 	if _my_hero_net >= 0 and _units.has(_my_hero_net):
 		var auto: bool = (_arena_time - _last_input_t) > 5.0
 		var suffix: String = "  ⚙ PILOTO AUTOMATICO (mova-se para assumir)" if auto else ""
@@ -117,13 +176,23 @@ func _process(delta: float) -> void:
 		if _send_acc >= 1.0 / SEND_HZ:
 			_send_acc = 0.0
 			NetworkManager.send_hero_input(_battle_id, _move_dir.x, _move_dir.y)
-	# Interpolacao suave das posicoes recebidas
+	var lerp_f: float = clampf(delta * 12.0, 0.0, 1.0)
+	# Interpolacao suave dos marcadores (heroi/torre)
 	for net in _units:
 		var u: Dictionary = _units[net]
 		var node: Node3D = u["node"]
 		if not is_instance_valid(node): continue
 		var tp: Vector3 = u.get("target_pos", node.position)
-		node.position = node.position.lerp(tp, clampf(delta * 12.0, 0.0, 1.0))
+		node.position = node.position.lerp(tp, lerp_f)
+	# Interpolacao + escrita das instancias dos soldados (MultiMesh)
+	if _mm:
+		var sc: int = min(_soldiers.size(), _MAX_SOLDIERS)
+		for si in range(sc):
+			var s: Dictionary = _soldiers[si]
+			s["pos"] = s["pos"].lerp(s["target"], lerp_f)
+			_mm.set_instance_transform(si, Transform3D(Basis(), s["pos"]))
+			_mm.set_instance_color(si, s["color"])
+		_mm.visible_instance_count = sc
 	# Cooldowns das skills (previsao do cliente)
 	for slot in _abil_cd.keys():
 		if _abil_cd[slot] > 0.0:

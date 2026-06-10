@@ -18,7 +18,7 @@ signal attack_alert(msg: String)   # alerta destacado: voce esta sob ataque
 signal local_resources_updated()  # emitido no cliente quando recursos chegam
 # Batalha 3D (cliente)
 signal battle_open(meta: Dictionary)       # servidor mandou abrir a arena
-signal battle_state(battle_id: int, snapshot: Array)
+signal battle_state(battle_id: int, snapshot: PackedInt32Array)
 signal battle_closed(battle_id: int)
 
 # Info local do cliente
@@ -123,7 +123,7 @@ func _stream_battles() -> void:
 	for b in BattleManager.battles:
 		if b.get("state","") != "running":
 			continue
-		var snap: Array = BattleManager.snapshot(b["id"])
+		var snap: PackedInt32Array = BattleManager.snapshot(b["id"])
 		for peer in b["viewers"]:
 			_battle_state.rpc_id(peer, b["id"], snap)
 
@@ -506,7 +506,7 @@ func _open_arena(meta: Dictionary) -> void:
 
 ## Snapshot do estado da batalha (posicoes/vida das unidades).
 @rpc("authority", "unreliable")
-func _battle_state(battle_id: int, snapshot: Array) -> void:
+func _battle_state(battle_id: int, snapshot: PackedInt32Array) -> void:
 	battle_state.emit(battle_id, snapshot)
 
 ## Batalha terminou: fecha a arena.

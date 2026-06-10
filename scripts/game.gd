@@ -238,7 +238,7 @@ func _on_battle_open(meta: Dictionary) -> void:
 	_world_map_layer.visible = false
 	_report_layer.visible = false
 
-func _on_battle_state(battle_id: int, snapshot: Array) -> void:
+func _on_battle_state(battle_id: int, snapshot: PackedInt32Array) -> void:
 	if is_instance_valid(_arena):
 		_arena.update_state(battle_id, snapshot)
 
