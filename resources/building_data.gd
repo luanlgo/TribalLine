@@ -34,14 +34,16 @@ extends Resource
 @export var attack_damage: float = 0.0
 @export var attack_range_m: float = 0.0
 @export var tower_attack_speed: float = 0.5
+# Progressao de produtores de ouro (ver DataManager._init_gold_tiers).
+#   tier 0  = edificio "nucleo" — sempre construivel.
+#   tier >=1 = produtor de ouro com gate de desbloqueio (loot).
+@export var tier: int = 0
+@export var rarity: String = ""  # "comum"|"incomum"|"raro"|"epico"|"lendario"|"mitico"
 
 func get_cost(level: int) -> Dictionary:
+	# Economia de moeda unica: tudo custa OURO.
 	var mult: float = pow(cost_multiplier, level - 1)
-	return {
-		"wood":  int(base_cost_wood  * mult),
-		"stone": int(base_cost_stone * mult),
-		"gold":  int(base_cost_gold  * mult)
-	}
+	return {"gold": int(base_cost_gold * mult)}
 
 func get_build_time(level: int) -> float:
 	return base_build_time * pow(build_time_multiplier, level - 1)
@@ -50,12 +52,9 @@ func get_max_hp(level: int) -> int:
 	return base_hp + hp_per_level * (level - 1)
 
 func get_production(level: int) -> Dictionary:
+	# So produz OURO (madeira/pedra foram removidas da economia).
 	var mult: float = 1.0 + production_per_level * (level - 1)
-	return {
-		"wood":  wood_per_hour  * mult,
-		"stone": stone_per_hour * mult,
-		"gold":  gold_per_hour  * mult
-	}
+	return {"gold": gold_per_hour * mult}
 
 func get_storage(level: int) -> int:
 	return base_storage + storage_per_level * level

@@ -48,6 +48,9 @@ func show_building(building_idx: int, entry: Dictionary) -> void:
 	var my_vs: GameManager.VillageState = GameManager.get_village(NetworkManager.local_username)
 
 	_add_lbl("Nome: %s" % bd.display_name, 15, Color.WHITE)
+	if bd.tier > 0:
+		_add_lbl("Produtor de Ouro — %s (Tier %d)" % [
+			GameConfig.rarity_label(bd.rarity), bd.tier], 11, GameConfig.rarity_color(bd.rarity))
 	_add_lbl(bd.description, 11, Color(0.8,0.8,0.8))
 	_content.add_child(HSeparator.new())
 	_add_lbl("Nivel: %d / %d" % [lv, bd.max_level])
@@ -56,13 +59,10 @@ func show_building(building_idx: int, entry: Dictionary) -> void:
 		var rem: float = entry.get("construction_end",0) - GameManager.get_game_time()
 		_add_lbl("Construindo: %ds restantes" % max(0,int(rem)), 12, Color.YELLOW)
 	else:
-		var prod: Dictionary = bd.get_production(lv)
-		if prod["wood"] > 0 or prod["stone"] > 0 or prod["gold"] > 0:
+		var prod_gold: float = bd.get_production(lv).get("gold", 0.0)
+		if prod_gold > 0.0:
 			_content.add_child(HSeparator.new())
-			_add_lbl("Producao por hora:", 11, Color.YELLOW)
-			if prod["wood"]  > 0: _add_lbl("  Madeira: %.0f" % prod["wood"],  11)
-			if prod["stone"] > 0: _add_lbl("  Pedra: %.0f"   % prod["stone"], 11)
-			if prod["gold"]  > 0: _add_lbl("  Ouro: %.0f"    % prod["gold"],  11)
+			_add_lbl("Producao: +%d ouro/min" % int(round(prod_gold)), 11, Color.YELLOW)
 		if bd.category == "storage" and lv >= 1:
 			_add_lbl("Armazena: +%d recursos" % bd.get_storage(lv), 11)
 		# Mercado: comprar comida com ouro (quantidade livre)
@@ -161,18 +161,13 @@ func show_building(building_idx: int, entry: Dictionary) -> void:
 		# Botao de upgrade
 		if lv < bd.max_level:
 			_content.add_child(HSeparator.new())
-			var next_cost: Dictionary = bd.get_cost(lv + 1)
+			var next_gold: int = int(bd.get_cost(lv + 1).get("gold", 0))
 			_add_lbl("Upgrade para Nv%d:" % (lv+1), 12, Color.YELLOW)
-			_add_lbl("  W:%d  S:%d  G:%d  Tempo:%.0fs" % [
-				next_cost["wood"], next_cost["stone"], next_cost["gold"],
-				bd.get_build_time(lv+1)], 11)
+			_add_lbl("  %d ouro  Tempo:%.0fs" % [next_gold, bd.get_build_time(lv+1)], 11)
 			var upg_btn := Button.new()
 			upg_btn.text = "MELHORAR"
 			if my_vs:
-				upg_btn.disabled = not (
-					my_vs.resources.get("wood",0)  >= next_cost["wood"] and
-					my_vs.resources.get("stone",0) >= next_cost["stone"] and
-					my_vs.resources.get("gold",0)  >= next_cost["gold"])
+				upg_btn.disabled = my_vs.resources.get("gold",0) < next_gold
 			upg_btn.pressed.connect(func() -> void:
 				upgrade_requested.emit(_current_idx)
 				visible = false)

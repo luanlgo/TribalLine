@@ -102,11 +102,10 @@ func _make_card(r: Dictionary, me: String) -> PanelContainer:
 		r.get("def_losses", {}))
 
 	var loot: Dictionary = r.get("loot", {})
-	var loot_total: int = int(loot.get("wood",0)) + int(loot.get("stone",0)) + int(loot.get("gold",0))
-	if loot_total > 0:
+	var loot_gold: int = int(loot.get("gold",0))
+	if loot_gold > 0:
 		var l := Label.new()
-		l.text = "Saque: %d madeira, %d pedra, %d ouro" % [
-			loot.get("wood",0), loot.get("stone",0), loot.get("gold",0)]
+		l.text = "Saque: %d ouro" % loot_gold
 		l.modulate = Color(0.95, 0.85, 0.4)
 		l.add_theme_font_size_override("font_size", 11)
 		vbox.add_child(l)
@@ -118,6 +117,22 @@ func _make_card(r: Dictionary, me: String) -> PanelContainer:
 		b.modulate = Color(0.9, 0.6, 0.4)
 		b.add_theme_font_size_override("font_size", 11)
 		vbox.add_child(b)
+
+	# Desbloqueio de produtor (drop de NPC ou roubo de jogador).
+	var unlock: Dictionary = r.get("unlock", {})
+	if unlock.has("unlocked"):
+		var u := Label.new()
+		u.text = "⭐ Desbloqueou: [%s] %s" % [
+			GameConfig.rarity_label(unlock.get("rarity","")), unlock.get("display","")]
+		u.modulate = GameConfig.rarity_color(unlock.get("rarity",""))
+		u.add_theme_font_size_override("font_size", 12)
+		vbox.add_child(u)
+	elif unlock.get("dup", false):
+		var u2 := Label.new()
+		u2.text = "Produtor repetido — +%d ouro de bonus" % int(unlock.get("gold",0))
+		u2.modulate = Color(0.9, 0.8, 0.4)
+		u2.add_theme_font_size_override("font_size", 11)
+		vbox.add_child(u2)
 
 	return card
 

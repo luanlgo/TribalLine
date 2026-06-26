@@ -5,10 +5,9 @@ extends Control
 # signal build_btn_pressed()  # removido — HUD chama _toggle_build_menu() diretamente
 signal map_toggled()
 signal reports_toggled()
+signal codex_toggled()
 signal train_requested(unit_id: String, count: int)
 
-var _wood_lbl: Label
-var _stone_lbl: Label
 var _gold_lbl: Label
 var _food_lbl: Label
 var _notif_lbl: Label
@@ -38,11 +37,15 @@ func _build_ui() -> void:
 	add_child(top)
 
 	top.add_child(_spacer(12,0))
-	_wood_lbl  = _res_lbl(top, "Madeira: 500", Color(0.5,0.88,0.3))
-	_stone_lbl = _res_lbl(top, "Pedra: 300",  Color(0.82,0.82,0.82))
-	_gold_lbl  = _res_lbl(top, "Ouro: 100",   Color(1.0,0.88,0.15))
+	_gold_lbl  = _res_lbl(top, "Ouro: 300",   Color(1.0,0.88,0.15))
 	_food_lbl  = _res_lbl(top, "Comida: 200", Color(0.95,0.5,0.35))
 	top.add_child(_spacer_expand())
+	var codex_btn := Button.new()
+	codex_btn.text = "COLECAO"
+	codex_btn.tooltip_text = "Veja os 30 produtores de ouro e o que voce ja desbloqueou."
+	codex_btn.pressed.connect(func() -> void: codex_toggled.emit())
+	top.add_child(codex_btn)
+	top.add_child(_spacer(8,0))
 	var rep_btn := Button.new()
 	rep_btn.text = "RELATORIOS"
 	rep_btn.pressed.connect(func() -> void: reports_toggled.emit())
@@ -155,15 +158,11 @@ func _build_ui() -> void:
 
 # ---------------------------------------------------------------------------
 func update_resources(vs: GameManager.VillageState) -> void:
-	_wood_lbl.text  = "Madeira: %d" % vs.resources.get("wood",0)
-	_stone_lbl.text = "Pedra: %d"   % vs.resources.get("stone",0)
-	_gold_lbl.text  = "Ouro: %d"    % vs.resources.get("gold",0)
+	_gold_lbl.text  = "Ouro: %d / %d" % [vs.resources.get("gold",0), vs.storage]
 	_food_lbl.text  = "Comida: %d"  % vs.resources.get("food",0)
 	# Tooltip de producao por segundo (ao passar o mouse)
 	var ps: Dictionary = GameManager.production_per_sec(vs)
-	_wood_lbl.tooltip_text  = "+%.2f madeira/s" % ps.get("wood", 0.0)
-	_stone_lbl.tooltip_text = "+%.2f pedra/s"   % ps.get("stone", 0.0)
-	_gold_lbl.tooltip_text  = "+%.2f ouro/s"    % ps.get("gold", 0.0)
+	_gold_lbl.tooltip_text  = "+%.2f ouro/s (capacidade: %d)" % [ps.get("gold", 0.0), vs.storage]
 	# Comida: mostra capacidade de tropas e consumo
 	var cap: int = GameManager.troop_capacity(vs)
 	var cur: int = GameManager.current_troop_count(vs)

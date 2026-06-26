@@ -401,7 +401,8 @@ func _spawn_building(idx: int, entry: Dictionary) -> void:
 			entry.get("hp", 0),
 			entry.get("max_hp", 1)
 		]
-		lbl.modulate = Color.WHITE
+		# Produtores de ouro ganham rotulo colorido pela raridade.
+		lbl.modulate = GameConfig.rarity_color(bd.rarity) if bd.tier > 0 else Color.WHITE
 	root.add_child(lbl)
 
 	add_child(root)

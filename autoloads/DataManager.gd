@@ -13,44 +13,19 @@ func _ready() -> void:
 func _init_buildings() -> void:
 	_b({"id":"town_hall","display_name":"Town Hall",
 		"description":"Coracao da aldeia. Nivel define o cap de outras estruturas.",
-		"max_level":10,"base_hp":2000,"hp_per_level":600,
-		"base_cost_wood":200,"base_cost_stone":200,"base_cost_gold":100,
+		"max_level":15,"base_hp":2000,"hp_per_level":600,
+		"base_cost_gold":500,
 		"cost_multiplier":2.0,"base_build_time":120.0,"build_time_multiplier":2.5,
 		"grid_size":Vector2i(3,3),
 		"placeholder_color":Color(0.55,0.35,0.15),"placeholder_shape":"box",
 		"placeholder_scale":Vector3(3.0,2.5,3.0),"category":"main",
 		"model_path":"res://assets/medieval_tavern.glb",
 		"model_scale":1.0,"model_y_offset":0.0,"model_y_rotation":0.0})
-	_b({"id":"woodcutter_hut","display_name":"Cabana do Lenhador",
-		"description":"Produz madeira ao longo do tempo.",
-		"base_hp":300,"base_cost_wood":50,"base_cost_stone":20,
-		"base_build_time":30.0,"grid_size":Vector2i(2,2),
-		"placeholder_color":Color(0.3,0.6,0.15),"placeholder_shape":"cylinder",
-		"placeholder_scale":Vector3(1.5,2.0,1.5),"category":"resource",
-		"wood_per_hour":10.0,"production_per_level":0.4,  # 10/min Lv1
-		"model_path":"res://assets/log_cabin.glb",
-		"model_scale":0.8,"model_y_offset":0.0,"model_y_rotation":0.0})
-	_b({"id":"stone_quarry","display_name":"Pedreira",
-		"description":"Extrai pedra da terra.",
-		"base_hp":400,"base_cost_wood":80,"base_cost_stone":40,
-		"base_build_time":45.0,"grid_size":Vector2i(2,2),
-		"placeholder_color":Color(0.6,0.6,0.6),"placeholder_shape":"box",
-		"placeholder_scale":Vector3(2.0,1.0,2.0),"category":"resource",
-		"stone_per_hour":7.0,"production_per_level":0.4,  # 7/min Lv1
-		"model_path":"res://assets/pedreira.glb",
-		"model_scale":1.2,"model_y_offset":-0.2,"model_y_rotation":0.0})
-	_b({"id":"gold_mine","display_name":"Mina de Ouro",
-		"description":"Minera ouro precioso.",
-		"base_hp":350,"base_cost_wood":100,"base_cost_stone":60,
-		"base_build_time":60.0,"grid_size":Vector2i(2,2),
-		"placeholder_color":Color(1.0,0.85,0.1),"placeholder_shape":"cylinder",
-		"placeholder_scale":Vector3(1.5,1.2,1.5),"category":"resource",
-		"gold_per_hour":3.0,"production_per_level":0.4,   # 3/min Lv1
-		"model_path":"res://assets/mining_tower.glb",
-		"model_scale":1.2,"model_y_offset":0.0,"model_y_rotation":0.0})
+	# Os produtores de ouro (gold_t1..gold_t30) sao gerados por _init_gold_tiers().
+	# Madeira/pedra foram removidas — economia de moeda unica.
 	_b({"id":"farm","display_name":"Fazenda",
 		"description":"Aumenta o limite de tropas (+50 por nivel).",
-		"base_hp":200,"base_cost_wood":60,"base_cost_stone":10,
+		"base_hp":200,"base_cost_gold":70,
 		"base_build_time":20.0,"grid_size":Vector2i(3,3),
 		"placeholder_color":Color(0.2,0.7,0.2),"placeholder_shape":"box",
 		"placeholder_scale":Vector3(3.0,0.3,3.0),"category":"resource",
@@ -58,7 +33,7 @@ func _init_buildings() -> void:
 		"model_scale":1.0,"model_y_offset":0.0,"model_y_rotation":0.0})
 	_b({"id":"market","display_name":"Mercado",
 		"description":"Compre comida para alimentar suas tropas.",
-		"base_hp":400,"base_cost_wood":120,"base_cost_stone":80,"base_cost_gold":50,
+		"base_hp":400,"base_cost_gold":250,
 		"base_build_time":60.0,"grid_size":Vector2i(2,2),
 		"placeholder_color":Color(0.85,0.7,0.3),"placeholder_shape":"box",
 		"placeholder_scale":Vector3(2.0,1.8,2.0),"category":"market",
@@ -66,24 +41,24 @@ func _init_buildings() -> void:
 		"model_scale":1.0,"model_y_offset":0.0,"model_y_rotation":0.0})
 	_b({"id":"hero_hut","display_name":"Cabana do Heroi",
 		"description":"Nomeie um heroi a partir de uma tropa. Ele ganha XP e voce o controla na batalha.",
-		"base_hp":500,"base_cost_wood":150,"base_cost_stone":120,"base_cost_gold":80,
+		"base_hp":500,"base_cost_gold":350,
 		"base_build_time":90.0,"grid_size":Vector2i(2,2),
 		"placeholder_color":Color(0.5,0.3,0.7),"placeholder_shape":"box",
 		"placeholder_scale":Vector3(2.0,2.2,2.0),"category":"hero",
 		"model_path":"res://assets/alchemist_laboratory.glb",
 		"model_scale":1.0,"model_y_offset":0.0,"model_y_rotation":0.0})
 	_b({"id":"warehouse","display_name":"Armazem",
-		"description":"Aumenta capacidade de armazenamento.",
-		"base_hp":500,"base_cost_wood":150,"base_cost_stone":100,
+		"description":"Aumenta capacidade de armazenamento de ouro.",
+		"base_hp":500,"base_cost_gold":250,
 		"base_build_time":45.0,"grid_size":Vector2i(2,2),
 		"placeholder_color":Color(0.7,0.5,0.3),"placeholder_shape":"box",
 		"placeholder_scale":Vector3(2.0,2.0,2.0),"category":"storage",
-		"base_storage":500,"storage_per_level":500,
+		"base_storage":2000,"storage_per_level":5000,
 		"model_path":"res://assets/warehouse.glb",
 		"model_scale":1.2,"model_y_offset":0.0,"model_y_rotation":0.0})
 	_b({"id":"barracks","display_name":"Quartel",
 		"description":"Treina infantaria corpo a corpo.",
-		"base_hp":600,"base_cost_wood":120,"base_cost_stone":80,"base_cost_gold":20,
+		"base_hp":600,"base_cost_gold":220,
 		"base_build_time":90.0,"grid_size":Vector2i(2,2),
 		"placeholder_color":Color(0.8,0.3,0.1),"placeholder_shape":"box",
 		"placeholder_scale":Vector3(2.0,2.0,2.0),"category":"military",
@@ -92,7 +67,7 @@ func _init_buildings() -> void:
 		"model_scale":1.3,"model_y_offset":0.0,"model_y_rotation":0.0})
 	_b({"id":"archery_range","display_name":"Campo de Tiro",
 		"description":"Treina unidades a distancia.",
-		"base_hp":500,"base_cost_wood":100,"base_cost_stone":60,"base_cost_gold":30,
+		"base_hp":500,"base_cost_gold":190,
 		"base_build_time":90.0,"grid_size":Vector2i(2,2),
 		"placeholder_color":Color(0.5,0.25,0.1),"placeholder_shape":"box",
 		"placeholder_scale":Vector3(2.5,1.5,2.0),"category":"military",
@@ -101,7 +76,7 @@ func _init_buildings() -> void:
 		"model_scale":1.0,"model_y_offset":0.0,"model_y_rotation":0.0})
 	_b({"id":"stable","display_name":"Estabulo",
 		"description":"Treina unidades de cavalaria.",
-		"base_hp":550,"base_cost_wood":150,"base_cost_stone":80,"base_cost_gold":50,
+		"base_hp":550,"base_cost_gold":280,
 		"base_build_time":120.0,"grid_size":Vector2i(3,2),
 		"placeholder_color":Color(0.6,0.4,0.1),"placeholder_shape":"box",
 		"placeholder_scale":Vector3(3.0,2.0,2.0),"category":"military",
@@ -109,7 +84,7 @@ func _init_buildings() -> void:
 	_b({"id":"wall","display_name":"Muralha",
 		"description":"Segmento de parede defensiva.",
 		"base_hp":1000,"hp_per_level":500,
-		"base_cost_wood":30,"base_cost_stone":80,
+		"base_cost_gold":110,
 		"base_build_time":15.0,"grid_size":Vector2i(1,1),
 		"placeholder_color":Color(0.5,0.5,0.5),"placeholder_shape":"box",
 		"placeholder_scale":Vector3(1.0,2.0,1.0),"category":"defense",
@@ -118,13 +93,60 @@ func _init_buildings() -> void:
 	_b({"id":"tower","display_name":"Torre",
 		"description":"Ataca inimigos proximos automaticamente.",
 		"base_hp":800,"hp_per_level":300,
-		"base_cost_wood":80,"base_cost_stone":150,"base_cost_gold":20,
+		"base_cost_gold":250,
 		"base_build_time":60.0,"grid_size":Vector2i(1,1),
 		"placeholder_color":Color(0.45,0.45,0.55),"placeholder_shape":"cylinder",
 		"placeholder_scale":Vector3(1.0,3.5,1.0),"category":"defense",
 		"attack_damage":20.0,"attack_range_m":8.0,"tower_attack_speed":0.5,
 		"model_path":"res://assets/watch_tower.glb",
 		"model_scale":1.0,"model_y_offset":0.0,"model_y_rotation":0.0})
+	_init_gold_tiers()
+
+# ---------------------------------------------------------------------------
+# Os 30 produtores de ouro (gold_t1..gold_t30).
+# Cada tier escala em producao e custo (formulas em GameConfig). O jogador
+# comeca apenas com o gold_t1 e desbloqueia os demais via loot (NPC/jogador).
+# ---------------------------------------------------------------------------
+func _init_gold_tiers() -> void:
+	# Nomes tematicos por banda de raridade (sem acentos, padrao do projeto).
+	var names: PackedStringArray = [
+		"Bateia", "Garimpo", "Cata-Ouro", "Lavra Rasa", "Veio de Cascalho", "Poco de Pepitas",
+		"Mina de Ouro", "Socavao", "Galeria Profunda", "Fundicao", "Casa da Moeda", "Tesouraria",
+		"Cofre Real", "Banco Mercante", "Bolsa de Ouro", "Refinaria Aurea", "Selo do Rei", "Camara do Tesouro",
+		"Forja Dourada", "Coracao de Midas", "Altar do Ouro", "Covil do Dragao", "Fonte Dourada", "Coroa Imperial",
+		"Veio Lendario", "Eden Dourado", "Trono de Ouro", "Relicario Solar", "Cidade de Ouro",
+		"Toque de Midas",
+	]
+	# Modelos GLB reciclados (assets limitados) — variam por tier para dar cara propria.
+	var models: PackedStringArray = [
+		"res://assets/log_cabin.glb",
+		"res://assets/pedreira.glb",
+		"res://assets/mining_tower.glb",
+		"res://assets/market_stall.glb",
+		"res://assets/warehouse.glb",
+		"res://assets/alchemist_laboratory.glb",
+	]
+	for t in range(1, GameConfig.GOLD_TIER_COUNT + 1):
+		var rarity: String = GameConfig.rarity_for_tier(t)
+		var prod: float = GameConfig.GOLD_BASE_PROD * pow(GameConfig.GOLD_PROD_GROWTH, t - 1)
+		var cost: int = int(round(GameConfig.GOLD_BASE_COST * pow(GameConfig.GOLD_COST_GROWTH, t - 1)))
+		_b({
+			"id": "gold_t%d" % t,
+			"display_name": names[t - 1],
+			"description": "Produtor de ouro %s (Tier %d). Produz ~%d ouro/min no Nv1." % [
+				GameConfig.rarity_label(rarity), t, int(round(prod))],
+			"max_level": 8, "base_hp": 300 + t * 30, "hp_per_level": 120,
+			"base_cost_gold": cost, "cost_multiplier": 1.5,
+			"base_build_time": 30.0 + t * 4.0, "build_time_multiplier": 1.6,
+			"grid_size": Vector2i(2, 2),
+			"placeholder_color": GameConfig.rarity_color(rarity),
+			"placeholder_shape": "cylinder" if t % 2 == 0 else "box",
+			"placeholder_scale": Vector3(1.6, 1.4 + t * 0.03, 1.6),
+			"category": "resource",
+			"gold_per_hour": prod, "production_per_level": 0.4,
+			"model_path": models[(t - 1) % models.size()],
+			"model_scale": 1.0, "tier": t, "rarity": rarity,
+		})
 
 func _init_units() -> void:
 	_u({"id":"warrior","display_name":"Guerreiro",
@@ -242,6 +264,8 @@ func _b(d: Dictionary) -> void:
 	bd.attack_damage        = float(d.get("attack_damage",0.0))
 	bd.attack_range_m       = float(d.get("attack_range_m",0.0))
 	bd.tower_attack_speed   = float(d.get("tower_attack_speed",0.5))
+	bd.tier                 = int(d.get("tier",0))
+	bd.rarity               = d.get("rarity","")
 	# Array[String] tipado nao aceita Array generica — copiar elemento a elemento
 	bd.trainable_units.clear()
 	for s: String in d.get("trainable_units", []):

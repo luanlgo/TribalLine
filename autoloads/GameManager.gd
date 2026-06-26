@@ -10,10 +10,18 @@ signal game_state_changed(new_state: GameState)
 signal village_updated(username: String)
 signal notification_received(msg: String)
 
-const GRID_SIZE: int    = 14
+const GRID_SIZE: int    = 22         # aldeia maior (cabe ate 30 construcoes)
 const CELL_SIZE: float  = 2.0
-const DEFAULT_STORAGE: int = 2000
+const DEFAULT_STORAGE: int = 25000
 const PRODUCTION_TICK: float = 60.0  # 1 minuto de jogo por tick
+
+# Edificios "nucleo" (sempre construiveis). Os produtores de ouro (tier>=1)
+# precisam ser desbloqueados via loot. gold_t1 e dado de inicio.
+const CORE_BUILDINGS: Array = [
+	"town_hall", "farm", "market", "hero_hut", "warehouse",
+	"barracks", "archery_range", "stable", "wall", "tower",
+]
+const STARTER_PRODUCER: String = "gold_t1"
 
 var current_state: GameState = GameState.MAIN_MENU
 
@@ -48,8 +56,11 @@ var _food_acc: float  = 0.0  # acumulador do tick de consumo de comida
 class VillageState:
 	var username: String = ""
 	var village_name: String = ""
-	var resources: Dictionary = {"wood":500,"stone":300,"gold":100,"food":200}
-	var storage: int = 2000
+	# Economia de moeda unica: OURO. Comida e upkeep de tropas (nao saqueavel).
+	var resources: Dictionary = {"gold":300,"food":200}
+	var storage: int = 25000
+	# Produtores de ouro desbloqueados (construiveis). Nucleo nao precisa estar aqui.
+	var unlocked_buildings: Array = []
 	# [{id, level, hp, max_hp, pos_x, pos_y, construction_end}]
 	var buildings: Array = []
 	# unit_id -> count
@@ -71,6 +82,7 @@ class VillageState:
 		return {
 			"username": username, "village_name": village_name,
 			"resources": resources.duplicate(true), "storage": storage,
+			"unlocked_buildings": unlocked_buildings.duplicate(),
 			"buildings": buildings.duplicate(true), "army": army.duplicate(),
 			"training_queue": training_queue.duplicate(true),
 			"map_pos_x": map_pos_x, "map_pos_y": map_pos_y,
@@ -84,12 +96,32 @@ class VillageState:
 		var vs := VillageState.new()
 		vs.username       = d.get("username","")
 		vs.village_name   = d.get("village_name","")
-		vs.resources      = d.get("resources",{"wood":500,"stone":300,"gold":100,"food":200})
+		vs.resources      = d.get("resources",{"gold":300,"food":200})
+		# Migracao moeda unica: madeira/pedra de saves antigos viram ouro.
+		var legacy: int = int(vs.resources.get("wood",0)) + int(vs.resources.get("stone",0))
+		if legacy > 0:
+			vs.resources["gold"] = int(vs.resources.get("gold",0)) + legacy
+		vs.resources.erase("wood")
+		vs.resources.erase("stone")
+		if not vs.resources.has("gold"):
+			vs.resources["gold"] = 0
 		# Garante a chave food em aldeias salvas antes do sistema de comida
 		if not vs.resources.has("food"):
 			vs.resources["food"] = 0
-		vs.storage        = d.get("storage",2000)
+		vs.storage        = d.get("storage",25000)
 		vs.buildings      = d.get("buildings",[])
+		# Remove construcoes cujo id nao existe mais (ex.: lenhador/pedreira antigos).
+		vs.buildings = vs.buildings.filter(func(e):
+			return DataManager.get_building(e.get("id","")) != null)
+		vs.unlocked_buildings = d.get("unlocked_buildings",[])
+		# Garante o produtor inicial + quaisquer produtores ja construidos como desbloqueados.
+		if not vs.unlocked_buildings.has(STARTER_PRODUCER):
+			vs.unlocked_buildings.append(STARTER_PRODUCER)
+		for e in vs.buildings:
+			var bid: String = e.get("id","")
+			var bdef: BuildingData = DataManager.get_building(bid)
+			if bdef and bdef.tier > 0 and not vs.unlocked_buildings.has(bid):
+				vs.unlocked_buildings.append(bid)
 		vs.army           = d.get("army",{})
 		vs.training_queue = d.get("training_queue",[])
 		vs.map_pos_x      = d.get("map_pos_x",0)
@@ -173,17 +205,19 @@ func init_village(username: String, village_name: String) -> VillageState:
 	var vs := VillageState.new()
 	vs.username     = username
 	vs.village_name = village_name
-	vs.resources    = {"wood":500,"stone":300,"gold":100,"food":GameConfig.FOOD_START}
+	vs.resources    = {"gold":300,"food":GameConfig.FOOD_START}
 	vs.storage      = DEFAULT_STORAGE
+	# Comeca apenas com o produtor mais fraco desbloqueado (os demais via loot).
+	vs.unlocked_buildings = [STARTER_PRODUCER]
 	# Posicao no mapa baseada em quantas aldeias existem
 	var idx: int = player_villages.size()
 	vs.map_pos_x = (idx % 8) * 3
 	vs.map_pos_y = floori(idx / 8.0) * 3
-	# Edificios iniciais
+	# Edificios iniciais: Prefeitura + o produtor de ouro inicial.
 	var th: BuildingData = DataManager.get_building("town_hall")
-	vs.buildings.append(_make_entry("town_hall", 1, th, 5, 5))
-	var wc: BuildingData = DataManager.get_building("woodcutter_hut")
-	vs.buildings.append(_make_entry("woodcutter_hut", 1, wc, 2, 2))
+	vs.buildings.append(_make_entry("town_hall", 1, th, 9, 9))
+	var st: BuildingData = DataManager.get_building(STARTER_PRODUCER)
+	vs.buildings.append(_make_entry(STARTER_PRODUCER, 1, st, 6, 6))
 	player_villages[username] = vs
 	print("[GameManager] Nova aldeia criada: %s" % username)
 	return vs
@@ -205,6 +239,9 @@ func server_request_build(username: String, building_id: String,
 	if not vs: return "Sem aldeia"
 	var bd: BuildingData = DataManager.get_building(building_id)
 	if not bd: return "Edificio desconhecido"
+	# Produtores de ouro (tier>=1) precisam estar desbloqueados (loot).
+	if bd.tier > 0 and not vs.unlocked_buildings.has(building_id):
+		return "Produtor bloqueado — desbloqueie vencendo acampamentos/jogadores"
 	if building_id != "town_hall" and _get_building_level(vs,"town_hall") < 1:
 		return "Town Hall necessaria"
 	if vs.buildings.size() >= GameConfig.MAX_BUILDINGS:
@@ -256,12 +293,10 @@ func server_request_demolish(username: String, building_idx: int) -> String:
 		return "Nao e possivel demolir durante construcao"
 	if entry.get("id", "") == "town_hall":
 		return "Nao e possivel demolir o Town Hall"
-	# Devolve 50% dos recursos da construcao (nivel 1)
+	# Devolve 50% do ouro da construcao (nivel 1)
 	var bd: BuildingData = DataManager.get_building(entry.get("id", ""))
 	if bd:
-		vs.resources["wood"]  = vs.resources.get("wood",  0) + int(bd.base_cost_wood  * 0.5)
-		vs.resources["stone"] = vs.resources.get("stone", 0) + int(bd.base_cost_stone * 0.5)
-		vs.resources["gold"]  = vs.resources.get("gold",  0) + int(bd.base_cost_gold  * 0.5)
+		vs.resources["gold"] = vs.resources.get("gold", 0) + int(bd.base_cost_gold * 0.5)
 	vs.buildings.remove_at(building_idx)
 	village_updated.emit(username)
 	return ""
@@ -728,6 +763,7 @@ func _apply_battle_result(m: Dictionary, ctx: Dictionary, outcome: Dictionary) -
 	var def_surv: Dictionary = outcome["def_survivors"]
 	var loot: Dictionary = {}
 	var bld_destroyed: int = 0
+	var unlock_info: Dictionary = {}
 
 	if attacker_won:
 		match kind:
@@ -738,11 +774,13 @@ func _apply_battle_result(m: Dictionary, ctx: Dictionary, outcome: Dictionary) -
 					dv.army = {}
 					bld_destroyed = _damage_buildings(dv)
 					_grant_protection(dv)
+					unlock_info = _roll_player_steal(av, dv)
 					village_updated.emit(def_player)
 			"npc":
 				var npc_ref = ctx["npc_ref"]
 				if npc_ref:
 					loot = _npc_reward(npc_ref, _army_loot_capacity(atk_surv))
+					unlock_info = _roll_npc_unlock(av, int(npc_ref["level"]))
 					npcs.erase(npc_ref)
 					if av:
 						av.npc_level_unlocked = max(av.npc_level_unlocked, npc_ref["level"] + 1)
@@ -789,14 +827,19 @@ func _apply_battle_result(m: Dictionary, ctx: Dictionary, outcome: Dictionary) -
 		"atk_losses": _diff_army(m["army"], atk_surv),
 		"def_losses": _diff_army(ctx["def_army"], def_surv),
 		"loot": loot.duplicate(), "buildings_destroyed": bld_destroyed,
-		"hero": m.get("hero", false), "hero_died": outcome.get("hero_died", false)
+		"hero": m.get("hero", false), "hero_died": outcome.get("hero_died", false),
+		"unlock": {}
 	}
 	_next_report_id += 1
-	_add_report(owner, report)
+	# O drop pertence so ao atacante — relatorio do defensor nao mostra o desbloqueio.
 	if def_player != "":
 		_add_report(def_player, report)
+	var atk_report: Dictionary = report.duplicate(true)
+	atk_report["unlock"] = unlock_info
+	_add_report(owner, atk_report)
 	notification_received.emit("[%s] %s contra %s" % [
 		"VITORIA" if attacker_won else "DERROTA", owner, ctx["def_label"]])
+	_announce_unlock(owner, unlock_info)
 
 # ---------------------------------------------------------------------------
 # Resolucao MULTI-FACCAO (FFA) — chamada pelo BattleManager ao fim da simulacao.
@@ -816,6 +859,7 @@ func apply_multi_result(factions: Array, surv: Dictionary, winner_team: int) -> 
 	# --- Defensor: saque/dano (se derrotado) ou mantem sobreviventes ---
 	var loot: Dictionary = {}
 	var bld_destroyed: int = 0
+	var winner_unlock: Dictionary = {}  # desbloqueio conquistado pelo time vencedor
 	if not def_fac.is_empty():
 		var ctx: Dictionary = def_fac.get("ctx", {})
 		var dkind: String = ctx.get("kind","")
@@ -831,14 +875,16 @@ func apply_multi_result(factions: Array, surv: Dictionary, winner_team: int) -> 
 						dv.army = {}
 						bld_destroyed = _damage_buildings(dv)
 						_grant_protection(dv)
+						winner_unlock = _roll_player_steal(_winner_village(factions, winner_team), dv)
 						if ctx.get("def_player","") != "":
 							village_updated.emit(ctx["def_player"])
 				"npc":
 					var npc_ref = ctx.get("npc_ref", null)
 					if npc_ref:
 						if cap > 0: loot = _npc_reward(npc_ref, cap)
-						npcs.erase(npc_ref)
 						var wv: VillageState = _winner_village(factions, winner_team)
+						winner_unlock = _roll_npc_unlock(wv, int(npc_ref["level"]))
+						npcs.erase(npc_ref)
 						if wv:
 							wv.npc_level_unlocked = max(wv.npc_level_unlocked, npc_ref["level"] + 1)
 				"march":
@@ -891,8 +937,12 @@ func apply_multi_result(factions: Array, surv: Dictionary, winner_team: int) -> 
 		var my_loot: Dictionary = loot if won else {}
 		if marches.has(m): marches.erase(m)
 		_make_return_march(m, fsurv, my_loot, had_hero and hero_alive)
-		_add_report(f["owner"], _build_report_ffa(f, surv, winner_team, factions,
-			my_loot, bld_destroyed if won else 0))
+		var frep: Dictionary = _build_report_ffa(f, surv, winner_team, factions,
+			my_loot, bld_destroyed if won else 0)
+		if won and not winner_unlock.is_empty():
+			frep["unlock"] = winner_unlock
+			_announce_unlock(f["owner"], winner_unlock)
+		_add_report(f["owner"], frep)
 
 	if factions.size() > 2:
 		notification_received.emit("Batalha multipla encerrada (%d lados)." % factions.size())
@@ -1038,26 +1088,15 @@ func _diff_army(before: Dictionary, after: Dictionary) -> Dictionary:
 
 ## Saca recursos (wood/stone/gold) do defensor, limitado pela capacidade total.
 func _take_loot(dv: VillageState, capacity: int) -> Dictionary:
-	var loot: Dictionary = {"wood":0,"stone":0,"gold":0}
-	var budget: int = capacity
-	for res in ["wood","stone","gold"]:
-		if budget <= 0: break
-		var avail: int = dv.resources.get(res, 0)
-		var take: int = min(avail, budget)
-		loot[res] = take
-		dv.resources[res] = avail - take
-		budget -= take
-	return loot
+	var avail: int = dv.resources.get("gold", 0)
+	var take: int = min(avail, max(0, capacity))
+	dv.resources["gold"] = avail - take
+	return {"gold": take}
 
-## Recompensa de um NPC por nivel, limitada pela capacidade de saque.
+## Recompensa de ouro de um NPC por nivel, limitada pela capacidade de saque.
 func _npc_reward(npc, capacity: int) -> Dictionary:
-	var per: int = npc["level"] * GameConfig.NPC_REWARD_PER_LEVEL
-	var reward: Dictionary = {"wood":per,"stone":per,"gold":per}
-	var total: int = per * 3
-	if total > capacity and total > 0:
-		var f: float = float(capacity) / float(total)
-		for r in reward: reward[r] = int(reward[r] * f)
-	return reward
+	var per: int = npc["level"] * GameConfig.NPC_REWARD_PER_LEVEL * 3
+	return {"gold": min(per, max(0, capacity))}
 
 ## Danifica as construcoes do defensor. Town Hall nunca e destruida.
 ## Retorna quantas construcoes foram destruidas.
@@ -1076,6 +1115,79 @@ func _damage_buildings(dv: VillageState) -> int:
 			kept.append(e)
 	dv.buildings = kept
 	return destroyed
+
+# ---------------------------------------------------------------------------
+# Desbloqueio de produtores por loot (Fase C)
+# ---------------------------------------------------------------------------
+## Sorteio ponderado de um tier em [1, max_tier]. Tiers altos sao
+## exponencialmente mais raros (ver GameConfig.RARITY_WEIGHT_FALLOFF).
+func _weighted_tier_pick(max_tier: int) -> int:
+	max_tier = clampi(max_tier, 1, GameConfig.GOLD_TIER_COUNT)
+	var weights: Array = []
+	var total: float = 0.0
+	for t in range(1, max_tier + 1):
+		var w: float = pow(GameConfig.RARITY_WEIGHT_FALLOFF, t - 1)
+		weights.append(w)
+		total += w
+	if total <= 0.0:
+		return 1
+	var r: float = randf() * total
+	var acc: float = 0.0
+	for i in range(weights.size()):
+		acc += weights[i]
+		if r <= acc:
+			return i + 1
+	return max_tier
+
+## Monta o dicionario de info de um desbloqueio (para relatorio/notificacao).
+func _unlock_info(bid: String) -> Dictionary:
+	var bd: BuildingData = DataManager.get_building(bid)
+	if not bd:
+		return {}
+	return {"unlocked": bid, "tier": bd.tier, "rarity": bd.rarity, "display": bd.display_name}
+
+## Vencer um NPC: chance de desbloquear um novo produtor (raridade crescente).
+## Se sortear um tier ja possuido, vira bonus de ouro. Retorna info p/ relatorio.
+func _roll_npc_unlock(av: VillageState, npc_level: int) -> Dictionary:
+	if av == null:
+		return {}
+	if randf() > GameConfig.NPC_DROP_CHANCE:
+		return {}
+	var max_tier: int = clampi(
+		int(round(npc_level * GameConfig.NPC_TIER_PER_LEVEL)), 1, GameConfig.GOLD_TIER_COUNT)
+	var chosen: int = _weighted_tier_pick(max_tier)
+	var bid: String = "gold_t%d" % chosen
+	if av.unlocked_buildings.has(bid):
+		var bonus: int = chosen * 50
+		av.resources["gold"] = min(av.storage, av.resources.get("gold", 0) + bonus)
+		return {"dup": true, "gold": bonus, "tier": chosen}
+	av.unlocked_buildings.append(bid)
+	return _unlock_info(bid)
+
+## Vencer a aldeia de um jogador: chance de copiar um produtor que ele tem
+## desbloqueado e voce nao (o defensor mantem o dele). Retorna info p/ relatorio.
+func _roll_player_steal(av: VillageState, dv: VillageState) -> Dictionary:
+	if av == null or dv == null:
+		return {}
+	if randf() > GameConfig.PLAYER_STEAL_CHANCE:
+		return {}
+	var cands: Array = []
+	for bid in dv.unlocked_buildings:
+		var bd: BuildingData = DataManager.get_building(bid)
+		if bd and bd.tier > 0 and not av.unlocked_buildings.has(bid):
+			cands.append(bid)
+	if cands.is_empty():
+		return {}
+	var pick: String = cands[randi() % cands.size()]
+	av.unlocked_buildings.append(pick)
+	return _unlock_info(pick)
+
+## Notifica (broadcast) um desbloqueio conquistado em batalha.
+func _announce_unlock(winner: String, info: Dictionary) -> void:
+	if info.is_empty() or not info.has("unlocked"):
+		return
+	notification_received.emit("⭐ %s desbloqueou [%s] %s!" % [
+		winner, GameConfig.rarity_label(info.get("rarity","")), info.get("display","produtor")])
 
 # ---------------------------------------------------------------------------
 # Ticks
@@ -1106,45 +1218,35 @@ func current_troop_count(vs: VillageState) -> int:
 
 ## Producao por SEGUNDO real (ja considerando GAME_SPEED) — para o tooltip do HUD.
 func production_per_sec(vs: VillageState) -> Dictionary:
-	var p: Dictionary = {"wood":0.0, "stone":0.0, "gold":0.0}
+	var gold: float = 0.0
 	for e in vs.buildings:
 		if e.get("construction_end",-1.0) > 0.0: continue
 		var bd: BuildingData = DataManager.get_building(e.get("id",""))
 		if not bd: continue
-		var pr: Dictionary = bd.get_production(e.get("level",1))
-		p["wood"]  += pr["wood"]
-		p["stone"] += pr["stone"]
-		p["gold"]  += pr["gold"]
-	# pr e por hora -> por segundo real = /3600 * GAME_SPEED
-	var f: float = GameConfig.GAME_SPEED / 3600.0
-	p["wood"]  *= f
-	p["stone"] *= f
-	p["gold"]  *= f
-	return p
+		gold += bd.get_production(e.get("level",1)).get("gold", 0.0)
+	# get_production() retorna ouro por MINUTO de jogo (1 tick de producao).
+	# Por segundo real = (ouro/min) / 60 * GAME_SPEED.
+	return {"gold": gold * GameConfig.GAME_SPEED / 60.0}
 
 func _tick_production() -> void:
 	for uname in player_villages:
 		# Producao so para jogadores online (ou todos — depende do design)
 		var vs: VillageState = player_villages[uname]
-		var prod: Dictionary = {"wood":0.0,"stone":0.0,"gold":0.0}
+		var gold_gain: float = 0.0
 		var total_storage: int = DEFAULT_STORAGE
 		for entry in vs.buildings:
 			if entry.get("construction_end",-1.0) > 0.0: continue
 			var bd: BuildingData = DataManager.get_building(entry["id"])
 			if not bd: continue
 			var lv: int = entry.get("level",1)
-			var p: Dictionary = bd.get_production(lv)
-			prod["wood"]  += p["wood"]  / 60.0 * PRODUCTION_TICK
-			prod["stone"] += p["stone"] / 60.0 * PRODUCTION_TICK
-			prod["gold"]  += p["gold"]  / 60.0 * PRODUCTION_TICK
+			# get_production() retorna ouro por minuto de jogo (= 1 tick).
+			gold_gain += bd.get_production(lv).get("gold", 0.0)
 			if bd.category == "storage":
 				total_storage += bd.get_storage(lv)
 		vs.storage = total_storage
-		for res in prod:
-			# prod[res] ja e um inteiro com PRODUCTION_TICK=60 (valor por minuto).
-			# roundi() evita erros de ponto flutuante (ex: 29.9999 -> 30).
-			vs.resources[res] = min(vs.storage,
-					vs.resources.get(res, 0) + roundi(prod[res]))
+		# roundi() evita erros de ponto flutuante (ex: 29.9999 -> 30).
+		vs.resources["gold"] = min(vs.storage,
+				vs.resources.get("gold", 0) + roundi(gold_gain))
 
 func _tick_training() -> void:
 	for uname in player_villages:
@@ -1228,9 +1330,7 @@ func _starve_army(vs: VillageState, deficit: float) -> int:
 # Utilitarios
 # ---------------------------------------------------------------------------
 func _can_afford(vs: VillageState, cost: Dictionary) -> bool:
-	return (vs.resources.get("wood",0)  >= cost.get("wood",0)  and
-			vs.resources.get("stone",0) >= cost.get("stone",0) and
-			vs.resources.get("gold",0)  >= cost.get("gold",0))
+	return vs.resources.get("gold",0) >= cost.get("gold",0)
 
 func _deduct(vs: VillageState, cost: Dictionary) -> void:
 	for res in cost: vs.resources[res] = max(0, vs.resources.get(res,0) - cost[res])

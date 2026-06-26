@@ -6,6 +6,7 @@ const VILLAGE_SCRIPT   := preload("res://scripts/village/village.gd")
 const WORLD_MAP_SCRIPT := preload("res://scripts/world_map/world_map.gd")
 const HUD_SCRIPT       := preload("res://scripts/ui/hud.gd")
 const REPORT_SCRIPT    := preload("res://scripts/ui/report_panel.gd")
+const CODEX_SCRIPT     := preload("res://scripts/ui/codex_panel.gd")
 const ARENA_SCRIPT     := preload("res://scripts/combat/battle_arena.gd")
 
 var _village
@@ -14,6 +15,8 @@ var _world_map
 var _world_map_layer: CanvasLayer
 var _report_panel
 var _report_layer: CanvasLayer
+var _codex_panel
+var _codex_layer: CanvasLayer
 var _arena: Node3D
 var _local_username: String = ""
 
@@ -43,6 +46,7 @@ func _ready() -> void:
 	_setup_hud()
 	_setup_world_map()
 	_setup_report_panel()
+	_setup_codex_panel()
 
 	# Garantir que a camera do jogo seja a ativa
 	_camera.make_current()
@@ -173,6 +177,7 @@ func _setup_hud() -> void:
 	_hud.connect("map_toggled",    _toggle_world_map)
 	_hud.connect("train_requested", _on_train_requested)
 	_hud.connect("reports_toggled", _toggle_reports)
+	_hud.connect("codex_toggled",   _toggle_codex)
 
 func _setup_world_map() -> void:
 	_world_map_layer = CanvasLayer.new()
@@ -203,6 +208,20 @@ func _setup_report_panel() -> void:
 	_report_panel.connect("close_requested",
 		func() -> void: _report_layer.visible = false)
 
+func _setup_codex_panel() -> void:
+	_codex_layer = CanvasLayer.new()
+	_codex_layer.layer   = 23
+	_codex_layer.visible = false
+	add_child(_codex_layer)
+	var ctrl := Control.new()
+	ctrl.name = "CodexPanel"
+	ctrl.set_script(CODEX_SCRIPT)
+	ctrl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_codex_layer.add_child(ctrl)
+	_codex_panel = ctrl
+	_codex_panel.connect("close_requested",
+		func() -> void: _codex_layer.visible = false)
+
 # ---------------------------------------------------------------------------
 # Eventos de jogo
 # ---------------------------------------------------------------------------
@@ -215,6 +234,11 @@ func _toggle_reports() -> void:
 	_report_layer.visible = not _report_layer.visible
 	if _report_layer.visible:
 		_report_panel.refresh()
+
+func _toggle_codex() -> void:
+	_codex_layer.visible = not _codex_layer.visible
+	if _codex_layer.visible:
+		_codex_panel.refresh()
 
 # ---------------------------------------------------------------------------
 # Arena de batalha 3D
@@ -268,6 +292,8 @@ func _on_village_state(username: String, state_dict: Dictionary) -> void:
 		_hud.update_resources(vs)
 		if _report_layer and _report_layer.visible:
 			_report_panel.refresh()
+		if _codex_layer and _codex_layer.visible:
+			_codex_panel.refresh()
 
 func _on_notification(msg: String) -> void:
 	_hud.show_notification(msg)

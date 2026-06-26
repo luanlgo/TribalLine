@@ -230,7 +230,8 @@ func _make_unit(uid: String, team: int, owner: String,
 		"controlled": false, "last_active": -999.0,  # piloto automatico apos inatividade
 		"kills": 0, "alive": true,
 		"target_net": -1,   # alvo em cache (evita rebuscar inimigo todo frame)
-		"abilities": [], "abil_cd": {}, "effects": [], "cast_t": 0.0
+		"abilities": [], "abil_cd": {}, "effects": [], "cast_t": 0.0,
+		"swing_t": 0.0      # >0 = acabou de golpear (flag visual de slash/impacto)
 	}
 
 func _next_id() -> int:
@@ -339,6 +340,17 @@ func _process(delta: float) -> void:
 
 func _sim_step(b: Dictionary, dt: float) -> void:
 	var a: float = GameConfig.ARENA_SIZE
+	# --- Compactacao periodica: remove SOLDADOS mortos do array, para os loops
+	#     O(n) ficarem proporcionais aos vivos conforme a batalha avanca.
+	#     Herois/torres mortos sao mantidos (poucos; o tally final precisa deles).
+	b["_compact_acc"] = b.get("_compact_acc", 0.0) + dt
+	if b["_compact_acc"] >= 1.0:
+		b["_compact_acc"] = 0.0
+		var kept: Array = []
+		for u in b["units"]:
+			if u["alive"] or u["is_hero"] or u["is_tower"]:
+				kept.append(u)
+		b["units"] = kept
 	# --- Passo 0: indices para busca rapida de alvo (montar O(n); consultar ~O(1)) ---
 	var net_map: Dictionary = {}
 	var grid: Dictionary = {}
@@ -348,12 +360,14 @@ func _sim_step(b: Dictionary, dt: float) -> void:
 		var key: int = _cell_key(u["x"], u["z"])
 		if not grid.has(key): grid[key] = []
 		grid[key].append(u)
+	b["_net_map"] = net_map   # cache para _unit_by_net O(1) (credito de abate)
 
 	# --- Passo 1: tica cooldowns/efeitos/DoT/cast ---
 	for u in b["units"]:
 		if not u["alive"]: continue
 		if u["cd"] > 0.0: u["cd"] = max(0.0, u["cd"] - dt)
 		if u["cast_t"] > 0.0: u["cast_t"] = max(0.0, u["cast_t"] - dt)
+		if u.get("swing_t", 0.0) > 0.0: u["swing_t"] = max(0.0, u["swing_t"] - dt)
 		for slot in u["abil_cd"].keys():
 			if u["abil_cd"][slot] > 0.0:
 				u["abil_cd"][slot] = max(0.0, u["abil_cd"][slot] - dt)
@@ -402,13 +416,21 @@ func _sim_step(b: Dictionary, dt: float) -> void:
 					var np := cur + (wp - cur).normalized() * step
 					u["x"] = clampf(np.x, 1.0, a - 1.0)
 					u["z"] = clampf(np.y, 1.0, a - 1.0)
-		# Ataque automatico no alcance (inclusive enquanto anda com WASD)
-		if not tgt.is_empty() and tgt.get("alive", false) and u["cd"] <= 0.0:
-			var dist := Vector2(u["x"], u["z"]).distance_to(Vector2(tgt["x"], tgt["z"]))
-			if dist <= u["rng"]:
-				var raw: float = max(1.0, _eff_atk(u) - tgt["def"] * 0.3)
-				_deal_damage(b, u["net"], tgt, raw)
-				u["cd"] = 1.0 / max(0.1, _eff_atk_spd(u))
+		# Ataque automatico no alcance (inclusive enquanto anda com WASD).
+		if u["cd"] <= 0.0:
+			if u["is_hero"]:
+				# Golpe em AREA (cleave): derruba TODOS em volta. So consome o
+				# golpe (cooldown/slash) se realmente acertou alguem.
+				var hit: int = _hero_cleave(b, grid, u)
+				if hit > 0:
+					u["cd"] = 1.0 / max(0.1, _eff_atk_spd(u))
+					u["swing_t"] = GameConfig.HERO_SWING_FX_TIME
+			elif not tgt.is_empty() and tgt.get("alive", false):
+				var dist := Vector2(u["x"], u["z"]).distance_to(Vector2(tgt["x"], tgt["z"]))
+				if dist <= u["rng"]:
+					var raw: float = max(1.0, _eff_atk(u) - tgt["def"] * 0.3)
+					_deal_damage(b, u["net"], tgt, raw, u["is_hero"])
+					u["cd"] = 1.0 / max(0.1, _eff_atk_spd(u))
 		# Bot tambem usa habilidades (uma por passo, na mais proxima)
 		if u["is_hero"] and bot_mode and not tgt.is_empty() and not u["abilities"].is_empty():
 			_bot_cast(b, u)
@@ -428,8 +450,13 @@ func _bot_cast(b: Dictionary, u: Dictionary) -> void:
 # Efeitos (buff/block/stun/mark/dot/taunt) e dano
 # ---------------------------------------------------------------------------
 ## Aplica dano a tgt considerando block (reduz) e mark (amplia); credita kill.
-func _deal_damage(b: Dictionary, src_net: int, tgt: Dictionary, raw: float) -> void:
+## src_is_hero=true desliga a reducao de dano do heroi (heroi bate em heroi cheio).
+func _deal_damage(b: Dictionary, src_net: int, tgt: Dictionary, raw: float,
+		src_is_hero: bool = false) -> void:
 	var dmg: float = max(0.0, _eff_dmg_in(tgt, raw))
+	# Heroi aguenta a multidao: tropas comuns causam dano reduzido a ele.
+	if tgt.get("is_hero", false) and not src_is_hero:
+		dmg *= GameConfig.HERO_INCOMING_DMG_MULT
 	tgt["hp"] -= dmg
 	if tgt["hp"] <= 0.0 and tgt["alive"]:
 		tgt["alive"] = false
@@ -605,7 +632,45 @@ func _knock(o: Dictionary, from: Vector2, dist: float) -> void:
 	o["x"] = clampf(o["x"] + dir.x, 1.0, a - 1.0)
 	o["z"] = clampf(o["z"] + dir.y, 1.0, a - 1.0)
 
+## Golpe basico em AREA do heroi: fere TODOS os inimigos no raio de cleave,
+## empurra os sobreviventes e cura por abate. Retorna quantos foram atingidos.
+## Usa o grid espacial ja montado no passo do sim (varre o bloco 3x3 ao redor).
+func _hero_cleave(b: Dictionary, grid: Dictionary, u: Dictionary) -> int:
+	var rad: float = max(u["rng"], GameConfig.HERO_CLEAVE_RADIUS)
+	var rad2: float = rad * rad
+	var ux: float = u["x"]
+	var uz: float = u["z"]
+	var ucx: int = int(ux / _GRID_CELL)
+	var ucz: int = int(uz / _GRID_CELL)
+	var atk: float = _eff_atk(u)
+	var center := Vector2(ux, uz)
+	var kb: float = GameConfig.HERO_CLEAVE_KNOCKBACK
+	var hits: int = 0
+	var kills: int = 0
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			var cell: Array = grid.get((ucx + dx) * 100000 + (ucz + dz), [])
+			for o in cell:
+				if not o["alive"] or o["team"] == u["team"]: continue
+				var ddx: float = ux - o["x"]
+				var ddz: float = uz - o["z"]
+				if ddx * ddx + ddz * ddz > rad2: continue
+				var was_alive: bool = o["alive"]
+				_deal_damage(b, u["net"], o, max(1.0, atk - o["def"] * 0.3), true)
+				hits += 1
+				if was_alive and not o["alive"]:
+					kills += 1
+				elif o["alive"] and kb > 0.0:
+					_knock(o, center, kb)
+	if kills > 0:
+		u["hp"] = min(u["max_hp"], u["hp"] + u["max_hp"] * GameConfig.HERO_LIFESTEAL_FRAC * kills)
+	return hits
+
 func _unit_by_net(b: Dictionary, net: int) -> Dictionary:
+	# Cache montado no _sim_step torna o credito de abate O(1) (em vez de O(n)).
+	var nm: Dictionary = b.get("_net_map", {})
+	if nm.has(net):
+		return nm[net]
 	for u in b["units"]:
 		if u["net"] == net: return u
 	return {}
@@ -750,7 +815,7 @@ func snapshot(battle_id: int) -> PackedInt32Array:
 		arr.append(_unit_flags(u))
 	return arr
 
-## Bitmask de estado para o cliente desenhar: 1=block 2=buff 4=stun 8=conjurando.
+## Bitmask de estado p/ o cliente: 1=block 2=buff 4=stun 8=conjurando 16=golpe.
 func _unit_flags(u: Dictionary) -> int:
 	var f: int = 0
 	for ef in u["effects"]:
@@ -758,6 +823,7 @@ func _unit_flags(u: Dictionary) -> int:
 		elif ef["kind"] == "buff": f |= 2
 		elif ef["kind"] == "stun": f |= 4
 	if u.get("cast_t", 0.0) > 0.0: f |= 8
+	if u.get("swing_t", 0.0) > 0.0: f |= 16
 	return f
 
 func _army_total(a: Dictionary) -> int:

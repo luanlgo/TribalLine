@@ -20,12 +20,31 @@ var _status_lbl: Label
 var _hero_lbl: Label
 var _units: Dictionary = {}   # net_id -> {node, target_pos, is_hero, team, mat}  (so heroi/torre)
 
+# --- Suculencia: combo de abates, screen shake, camera seguindo o heroi ---
+var _combo: int = 0
+var _best_combo: int = 0
+var _combo_t: float = 0.0          # tempo restante antes do combo zerar
+var _combo_punch: float = 0.0      # escala extra do texto no ultimo abate (decai)
+var _combo_lbl: Label
+var _shake: float = 0.0            # magnitude atual do tremor de tela (decai)
+var _cam_pos: Vector3 = Vector3.ZERO   # posicao suavizada da camera (follow)
+const COMBO_RADIUS: float = 7.0    # abates dentro deste raio do heroi contam combo
+const COMBO_DECAY: float = 2.5     # segundos sem abate para o combo zerar
+const CAM_FOLLOW_HEIGHT: float = 30.0
+const CAM_FOLLOW_BACK: float = 26.0
+
 # Soldados (kind 0) renderizados via MultiMesh — 1 draw call p/ centenas de unidades.
 var _mm: MultiMesh
 var _mm_inst: MultiMeshInstance3D
 var _soldiers: Array = []          # [{net, pos: Vector3, target: Vector3, color: Color}]
 var _soldier_idx: Dictionary = {}  # net -> indice em _soldiers
 const _MAX_SOLDIERS: int = 4096
+
+# Pool de particulas de morte reutilizaveis — evita alocar nos no meio da batalha
+# (alocacao de no por morte era a principal fonte de travadas em mortes em massa).
+var _fx_pool: Array = []
+var _fx_cursor: int = 0
+const _FX_POOL_SIZE: int = 40
 
 # Barra de habilidades (cliente preve cooldown — conhece os valores do kit)
 var _abilities: Array = []                 # kit do heroi controlado
@@ -47,7 +66,27 @@ func _ready() -> void:
 	_setup_lighting()
 	_setup_ground()
 	_setup_soldiers_multimesh()
+	_setup_fx_pool()
 	_setup_overlay()
+
+## Cria o pool de emissores de particulas (reutilizados ciclicamente).
+func _setup_fx_pool() -> void:
+	for i in _FX_POOL_SIZE:
+		var p := CPUParticles3D.new()
+		p.emitting = false
+		p.one_shot = true
+		p.explosiveness = 1.0          # tudo num estouro so (impacto)
+		p.amount = 12                  # fixo: trocar amount realoca buffers (causa hitch)
+		p.lifetime = 0.6
+		p.direction = Vector3(0, 1, 0)
+		p.spread = 80.0
+		p.gravity = Vector3(0, -9.0, 0)
+		p.initial_velocity_min = 2.5
+		p.initial_velocity_max = 6.0
+		p.scale_amount_min = 0.18
+		p.scale_amount_max = 0.34
+		add_child(p)
+		_fx_pool.append(p)
 
 ## Cria o MultiMesh dos soldados (cor por instancia: aliado=verde, inimigo=vermelho).
 func _setup_soldiers_multimesh() -> void:
@@ -114,7 +153,11 @@ func update_state(battle_id: int, snapshot: PackedInt32Array) -> void:
 				var col: Color = Color(0.35, 0.8, 0.4) if team == _my_team else Color(0.9, 0.35, 0.3)
 				_soldiers.append({"net": net, "pos": Vector3(x, 0.8, z),
 					"target": Vector3(x, 0.8, z), "color": col})
-				_soldier_idx[net] = _soldiers.size() - 1
+				var nidx: int = _soldiers.size() - 1
+				_soldier_idx[net] = nidx
+				# Cor so muda na criacao/troca de slot — nao reescrevemos todo frame.
+				if _mm and nidx < _MAX_SOLDIERS:
+					_mm.set_instance_color(nidx, _soldiers[nidx]["color"])
 			else:
 				_soldiers[idx]["target"] = Vector3(x, 0.8, z)
 		else:
@@ -129,20 +172,43 @@ func update_state(battle_id: int, snapshot: PackedInt32Array) -> void:
 			_apply_flags(u, flags)
 			if u.get("is_hero", false) and u.has("hp_fill"):
 				_update_hp_bar(u, hp_pct)
+			# Golpe do heroi (borda de subida do bit 16): slash + tremor de tela.
+			if kind == 1:
+				var prev_f: int = u.get("last_flags", 0)
+				if (flags & 16) != 0 and (prev_f & 16) == 0:
+					_fx_slash(Vector3(x, 0.0, z), team == _my_team)
+					if net == _my_hero_net:
+						_shake = maxf(_shake, 0.5)
+				u["last_flags"] = flags
 	# Soldados que sairam do snapshot (morreram) — remove com swap-back (O(1))
 	var dead: Array = []
 	for net in _soldier_idx.keys():
 		if not seen_soldiers.has(net):
 			dead.append(net)
-	var fx_budget: int = 10   # limita particulas/frame para nao travar em mortes em massa
+	# Posicao do meu heroi (para creditar combo aos abates proximos).
+	var hero_pos: Vector3 = Vector3(1e9, 0.0, 1e9)
+	var have_hero: bool = _my_hero_net >= 0 and _units.has(_my_hero_net)
+	if have_hero:
+		hero_pos = _units[_my_hero_net].get("target_pos", Vector3.ZERO)
+	var fx_budget: int = 18   # limita particulas/frame para nao travar em mortes em massa
 	for net in dead:
 		var idx: int = _soldier_idx[net]
+		var spos: Vector3 = _soldiers[idx]["pos"]
+		var near_hero: bool = have_hero and spos.distance_to(hero_pos) <= COMBO_RADIUS
+		if near_hero:
+			_combo += 1
+			_combo_t = COMBO_DECAY
+			_combo_punch = 1.0
+			if _combo > _best_combo: _best_combo = _combo
 		if fx_budget > 0:
-			_fx_death(_soldiers[idx]["pos"]); fx_budget -= 1
+			_fx_death(spos, near_hero); fx_budget -= 1
 		var last: int = _soldiers.size() - 1
 		if idx != last:
 			_soldiers[idx] = _soldiers[last]
 			_soldier_idx[_soldiers[idx]["net"]] = idx
+			# O slot 'idx' passou a ser outro soldado: atualiza a cor uma vez.
+			if _mm and idx < _MAX_SOLDIERS:
+				_mm.set_instance_color(idx, _soldiers[idx]["color"])
 		_soldiers.pop_back()
 		_soldier_idx.erase(net)
 	# Marcadores (heroi/torre) que morreram
@@ -191,7 +257,6 @@ func _process(delta: float) -> void:
 			var s: Dictionary = _soldiers[si]
 			s["pos"] = s["pos"].lerp(s["target"], lerp_f)
 			_mm.set_instance_transform(si, Transform3D(Basis(), s["pos"]))
-			_mm.set_instance_color(si, s["color"])
 		_mm.visible_instance_count = sc
 	# Cooldowns das skills (previsao do cliente)
 	for slot in _abil_cd.keys():
@@ -205,6 +270,16 @@ func _process(delta: float) -> void:
 		ui["lbl"].visible = on_cd
 		if on_cd:
 			ui["lbl"].text = "%.0f" % ceil(rem)
+	# Combo de abates: decai e atualiza o rotulo grande.
+	if _combo_punch > 0.0:
+		_combo_punch = max(0.0, _combo_punch - delta * 3.0)
+	if _combo_t > 0.0:
+		_combo_t = max(0.0, _combo_t - delta)
+		if _combo_t <= 0.0:
+			_combo = 0
+	_update_combo_label()
+	# Camera segue o heroi controlado (mais perto) + screen shake.
+	_update_camera(delta)
 
 # ---------------------------------------------------------------------------
 # Input: clique no chao = mover o heroi (auto-ataca no alcance)
@@ -463,6 +538,17 @@ func _setup_overlay() -> void:
 	_hero_lbl.add_theme_font_size_override("font_size", 14)
 	_hero_lbl.modulate = Color(1, 0.9, 0.3)
 	_overlay.add_child(_hero_lbl)
+	# Contador de COMBO (abates seguidos perto do heroi) — bem grande e central.
+	_combo_lbl = Label.new()
+	_combo_lbl.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_combo_lbl.offset_left = -340; _combo_lbl.offset_right = 340
+	_combo_lbl.offset_top = 120; _combo_lbl.offset_bottom = 220
+	_combo_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_combo_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_combo_lbl.add_theme_font_size_override("font_size", 46)
+	_combo_lbl.modulate = Color(1, 0.85, 0.2, 0.0)
+	_combo_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_overlay.add_child(_combo_lbl)
 	var leave_btn := Button.new()
 	leave_btn.text = "Sair"
 	leave_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
@@ -471,7 +557,7 @@ func _setup_overlay() -> void:
 	leave_btn.pressed.connect(func() -> void: battle_left.emit())
 	_overlay.add_child(leave_btn)
 	var hint := Label.new()
-	hint.text = "WASD: mover  |  Q / E / R / Botao Direito: habilidades  (ataque e automatico)"
+	hint.text = "WASD: mover entre os inimigos  |  Q / E / R / Botao Direito: habilidades  |  o golpe basico atinge TODOS em volta (cleave)"
 	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	hint.offset_top = -110
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -487,16 +573,66 @@ func _setup_overlay() -> void:
 	legend.modulate = Color(0.9, 0.9, 0.9)
 	_overlay.add_child(legend)
 
-func _fx_death(pos: Vector3) -> void:
-	var p := CPUParticles3D.new()
+func _fx_death(pos: Vector3, big: bool = false) -> void:
+	if _fx_pool.is_empty(): return
+	var p: CPUParticles3D = _fx_pool[_fx_cursor]
+	_fx_cursor = (_fx_cursor + 1) % _fx_pool.size()
 	p.position = pos + Vector3(0, 0.5, 0)
-	p.emitting = true
-	p.one_shot = true
-	p.amount = 8
-	p.lifetime = 0.5
-	p.initial_velocity_min = 2.0
-	p.initial_velocity_max = 4.0
-	p.color = Color(0.9, 0.3, 0.1)
-	add_child(p)
-	await get_tree().create_timer(1.0).timeout
-	if is_instance_valid(p): p.queue_free()
+	# Abates perto do heroi pipocam dourado (mais "porrada"); outros, fumaca avermelhada.
+	p.color = Color(1.0, 0.8, 0.25) if big else Color(0.9, 0.3, 0.1)
+	p.initial_velocity_max = 7.0 if big else 5.0
+	p.restart()   # reemite o estouro (sem alocar nada)
+
+## Anel de impacto expandindo no chao (golpe do heroi). Dourado=aliado, vermelho=inimigo.
+func _fx_slash(pos: Vector3, ally: bool) -> void:
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = GameConfig.HERO_CLEAVE_RADIUS * 0.55
+	tm.outer_radius = GameConfig.HERO_CLEAVE_RADIUS * 0.72
+	ring.mesh = tm
+	ring.position = pos + Vector3(0, 0.25, 0)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var base_col: Color = Color(1.0, 0.9, 0.4, 0.85) if ally else Color(1.0, 0.4, 0.3, 0.85)
+	m.albedo_color = base_col
+	ring.material_override = m
+	add_child(ring)
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3(1.8, 1.8, 1.8), 0.3).from(Vector3(0.6, 0.6, 0.6))
+	tw.tween_property(m, "albedo_color", Color(base_col.r, base_col.g, base_col.b, 0.0), 0.3)
+	tw.set_parallel(false)
+	tw.tween_callback(ring.queue_free)
+
+## Atualiza o rotulo de COMBO (some abaixo de 2; esquenta a cor e da um "punch").
+func _update_combo_label() -> void:
+	if not _combo_lbl: return
+	if _combo < 2:
+		_combo_lbl.modulate.a = lerpf(_combo_lbl.modulate.a, 0.0, 0.2)
+		return
+	_combo_lbl.text = "COMBO  x%d" % _combo
+	var heat: float = clampf(_combo / 40.0, 0.0, 1.0)
+	var col := Color(1.0, 0.85 - 0.5 * heat, 0.22 - 0.15 * heat)
+	col.a = clampf(_combo_t / COMBO_DECAY, 0.0, 1.0)
+	_combo_lbl.modulate = col
+	var s: float = 1.0 + 0.35 * _combo_punch + 0.2 * heat
+	_combo_lbl.pivot_offset = _combo_lbl.size * 0.5
+	_combo_lbl.scale = Vector2(s, s)
+
+## Camera: segue o heroi controlado (mais perto da acao) e aplica screen shake.
+func _update_camera(delta: float) -> void:
+	if not _camera: return
+	var target: Vector3 = Vector3(ARENA * 0.5, ARENA * 0.78, ARENA + 12.0)  # overview
+	if _my_hero_net >= 0 and _units.has(_my_hero_net):
+		var hp: Vector3 = _units[_my_hero_net]["node"].position
+		target = Vector3(hp.x, CAM_FOLLOW_HEIGHT, hp.z + CAM_FOLLOW_BACK)
+	if _cam_pos == Vector3.ZERO:
+		_cam_pos = target
+	_cam_pos = _cam_pos.lerp(target, clampf(delta * 4.0, 0.0, 1.0))
+	if _shake > 0.0:
+		_shake = max(0.0, _shake - delta * 2.2)
+	var off := Vector3.ZERO
+	if _shake > 0.0:
+		off = Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake
+	_camera.position = _cam_pos + off
