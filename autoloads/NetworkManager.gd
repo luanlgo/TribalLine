@@ -380,6 +380,19 @@ func client_request_join_battle(battle_id: int) -> void:
 	else:
 		_open_arena.rpc_id(peer, meta)
 
+## [TESTE] Inicia uma batalha de sandbox (heroi-vs-heroi) para checar o PvP.
+@rpc("any_peer", "reliable")
+func client_request_test_battle(troop_count: int, unit_id: String) -> void:
+	if not multiplayer.is_server(): return
+	var peer: int = multiplayer.get_remote_sender_id()
+	var uname: String = GameManager.get_username_for_peer(peer)
+	if uname == "": return
+	var meta: Dictionary = BattleManager.begin_sandbox_battle(uname, peer, troop_count, unit_id)
+	if meta.is_empty():
+		_send_error.rpc_id(peer, "Falha ao iniciar batalha de teste")
+	else:
+		_open_arena.rpc_id(peer, meta)
+
 ## Input do heroi durante a batalha: direcao de movimento WASD (dx,dz).
 @rpc("any_peer", "unreliable")
 func client_hero_input(battle_id: int, dx: float, dz: float) -> void:
@@ -624,6 +637,14 @@ func request_join_battle(battle_id: int) -> void:
 		if not meta.is_empty(): battle_open.emit(meta)
 	else:
 		client_request_join_battle.rpc_id(1, battle_id)
+
+## [TESTE] Pede ao servidor uma batalha de sandbox heroi-vs-heroi.
+func request_test_battle(troop_count: int, unit_id: String = "warrior") -> void:
+	if multiplayer.is_server():
+		var meta: Dictionary = BattleManager.begin_sandbox_battle(local_username, 1, troop_count, unit_id)
+		if not meta.is_empty(): battle_open.emit(meta)
+	else:
+		client_request_test_battle.rpc_id(1, troop_count, unit_id)
 
 func send_hero_input(battle_id: int, dx: float, dz: float) -> void:
 	if multiplayer.is_server():

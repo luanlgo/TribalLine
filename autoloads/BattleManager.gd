@@ -181,6 +181,110 @@ func _make_hero_unit_for(owner: String, team: int, x: float, z: float) -> Dictio
 	hu["abilities"] = hs.get("abilities", [])
 	return hu
 
+# ---------------------------------------------------------------------------
+# [TESTE] Batalha de sandbox heroi-vs-heroi (checar o PvP rapidamente).
+# Nao consome tropas/heroi reais nem aplica saque/baixas (flag sandbox=true).
+# ---------------------------------------------------------------------------
+func begin_sandbox_battle(username: String, peer: int, troop_count: int,
+		unit_id: String = "warrior") -> Dictionary:
+	if not multiplayer.is_server():
+		return {}
+	if DataManager.get_unit(unit_id) == null:
+		unit_id = "warrior"
+	troop_count = clampi(troop_count, 0, 1000)
+	var a: float = GameConfig.ARENA_SIZE
+	var b: Dictionary = {
+		"id": _next_battle_id, "attacker": username, "defender_user": "",
+		"def_label": "Inimigo (Teste)", "kind": "sandbox",
+		"m": {}, "ctx": {}, "state": "running",
+		"join_timer": 0.0, "elapsed": 0.0, "px": 0.0, "py": 0.0,
+		"units": [], "viewers": [], "controllers": {},
+		"factions": [
+			{"team": 0, "owner": username, "role": "attacker", "m": {}},
+			{"team": 1, "owner": "", "role": "defender", "ctx": {}},
+		],
+		"next_team": 2, "_sim_acc": 0.0, "_stream_acc": 0.0,
+		"sandbox": true
+	}
+	_next_battle_id += 1
+
+	# Exercitos: mesma quantidade dos dois lados.
+	var army: Dictionary = {unit_id: troop_count} if troop_count > 0 else {}
+	_spawn_army_dict(b, army, 0, username)
+	_spawn_army_dict(b, army.duplicate(), 1, "")
+
+	# Heroi do jogador: usa o real (read-only) se existir; senao um sintetico Nv5.
+	var av: GameManager.VillageState = GameManager.get_village(username)
+	var anchor0: Vector2 = _faction_anchor(0, a)
+	var p_uid: String = unit_id
+	var p_lvl: int = 5
+	var phero: Dictionary = {}
+	if av and not GameManager.hero_stats(av).is_empty():
+		phero = _make_hero_unit_for(username, 0, anchor0.x, anchor0.y)
+		p_uid = av.hero.get("unit_id", unit_id)
+		p_lvl = int(av.hero.get("level", 5))
+	else:
+		phero = _make_synthetic_hero(username, 0, anchor0.x, anchor0.y, unit_id, 5)
+	if not phero.is_empty():
+		b["units"].append(phero)
+
+	# Heroi inimigo: espelha o do jogador (mesmo tipo/nivel) para um duelo justo.
+	var anchor1: Vector2 = _faction_anchor(1, a)
+	var ehero: Dictionary = _make_synthetic_hero("", 1, anchor1.x, anchor1.y, p_uid, p_lvl)
+	if not ehero.is_empty():
+		b["units"].append(ehero)
+
+	battles.append(b)
+	set_process(true)
+
+	# Registra o jogador como espectador e controlador do proprio heroi.
+	b["viewers"].append(peer)
+	var hero_net: int = -1
+	var hero_uid: String = ""
+	if not phero.is_empty():
+		b["controllers"][peer] = phero["net"]
+		phero["controlled"] = true
+		phero["last_active"] = 0.0
+		hero_net = phero["net"]
+		hero_uid = phero["uid"]
+	return {
+		"id": b["id"], "attacker": username, "defender": "Inimigo (Teste)",
+		"my_hero_net": hero_net, "my_hero_uid": hero_uid, "my_team": 0
+	}
+
+## Spawna um exercito (uid->n) como formacao da faccao 'team' (sem heroi).
+func _spawn_army_dict(b: Dictionary, army: Dictionary, team: int, owner: String) -> void:
+	var a: float = GameConfig.ARENA_SIZE
+	var anchor: Vector2 = _faction_anchor(team, a)
+	var uids: Array = []
+	for uid in army:
+		for _i in range(army[uid]):
+			uids.append(uid)
+	var pos: Array = _formation_positions(uids.size(), anchor)
+	for i in range(uids.size()):
+		b["units"].append(_make_unit(uids[i], team, owner, pos[i].x, pos[i].y, false))
+
+## Cria uma unidade-heroi sintetica (sem depender de aldeia/heroi real).
+func _make_synthetic_hero(owner: String, team: int, x: float, z: float,
+		unit_id: String, level: int) -> Dictionary:
+	var ud: UnitData = DataManager.get_unit(unit_id)
+	if not ud:
+		return {}
+	var scale: float = 1.0 + GameConfig.HERO_PER_LEVEL * (level - 1)
+	var p: Dictionary = ud.passive
+	var hu: Dictionary = _make_unit(unit_id, team, owner, x, z, true)
+	hu["hp"] = int(ud.hp * GameConfig.HERO_HP_MULT * scale * p.get("hp_mult", 1.0))
+	hu["max_hp"] = hu["hp"]
+	hu["atk"] = ud.attack * GameConfig.HERO_ATK_MULT * scale * p.get("atk_mult", 1.0)
+	hu["def"] = ud.defense * GameConfig.HERO_DEF_MULT * scale * p.get("def_mult", 1.0)
+	hu["rng"] = ud.attack_range + p.get("rng_bonus", 0.0)
+	hu["atk_spd"] = ud.attack_speed
+	hu["spd"] = GameConfig.ARENA_HERO_SPEED * p.get("spd_mult", 1.0)
+	hu["name"] = "%s Heroi Nv%d" % [ud.display_name, level]
+	hu["level"] = level
+	hu["abilities"] = ud.abilities
+	return hu
+
 ## Procura uma batalha ativa (pendente/rolando) cujo alvo seja o mesmo de m.
 func find_battle_for_target(m: Dictionary) -> Dictionary:
 	for b in battles:
@@ -736,6 +840,11 @@ func _battle_over(b: Dictionary) -> bool:
 # ---------------------------------------------------------------------------
 ## Resolve pelo estado atual da simulacao 3D (FFA multi-faccao).
 func _resolve_from_sim(b: Dictionary) -> void:
+	# Sandbox de teste: so encerra, sem mexer em aldeias/saque/baixas.
+	if b.get("sandbox", false):
+		b["state"] = "done"
+		battle_ended.emit(b["id"], b["viewers"].duplicate())
+		return
 	# Tally por time: exercito sobrevivente, heroi vivo/kills, poder (HP vivo).
 	var surv: Dictionary = {}
 	for f in b["factions"]:
@@ -790,6 +899,8 @@ func _finish(b: Dictionary, outcome: Dictionary) -> void:
 func icons() -> Array:
 	var r: Array = []
 	for b in battles:
+		if b.get("sandbox", false):
+			continue   # batalha de teste nao aparece no mapa (so do dono)
 		r.append({
 			"id": b["id"], "px": b["px"], "py": b["py"],
 			"attacker": b["attacker"], "defender_user": b.get("defender_user",""),

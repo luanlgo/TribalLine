@@ -57,6 +57,30 @@ func _ready() -> void:
 	print("[reduc] heroi->heroi dano cru 100 -> recebido %.1f (esperado 100)" % taken_full)
 	if absf(taken_full - 100.0) > 1.0: fails.append("heroi->heroi nao deu dano cheio")
 
+	# --- Sandbox PvP de teste: helpers ---
+	var sb: Dictionary = {"units": []}
+	bm._spawn_army_dict(sb, {"warrior": 10}, 0, "p")
+	bm._spawn_army_dict(sb, {"warrior": 10}, 1, "")
+	var sh: Dictionary = bm._make_synthetic_hero("p", 0, 32.0, 60.0, "warrior", 5)
+	print("[sandbox] army_units=%d  hero hp=%s atk=%.0f abilidades=%d" % [
+		sb["units"].size(), str(sh.get("hp")), sh.get("atk", 0.0), sh.get("abilities", []).size()])
+	if sb["units"].size() != 20: fails.append("sandbox: _spawn_army_dict contou errado (%d)" % sb["units"].size())
+	if sh.is_empty() or int(sh.get("hp", 0)) <= 0: fails.append("sandbox: _make_synthetic_hero invalido")
+	if sh.get("abilities", []).size() <= 0: fails.append("sandbox: heroi sintetico sem habilidades")
+	# begin_sandbox_battle (best-effort: depende de is_server no harness)
+	var meta: Dictionary = bm.begin_sandbox_battle("__t", 1, 12, "warrior")
+	if meta.is_empty():
+		print("[sandbox] begin_sandbox_battle pulado (is_server=false no harness)")
+	else:
+		var bt: Dictionary = bm.find_battle(meta.get("id", -1))
+		var heroes: int = 0
+		for u in bt.get("units", []):
+			if u["is_hero"]: heroes += 1
+		print("[sandbox] batalha criada: units=%d heroes=%d my_hero_net=%d" % [
+			bt.get("units", []).size(), heroes, meta.get("my_hero_net", -1)])
+		if heroes < 2: fails.append("sandbox: faltou heroi nos dois lados (%d)" % heroes)
+		bm.battles.erase(bt)   # limpa para o harness nao simular
+
 	if fails.is_empty():
 		print("==> COMBAT SMOKE TEST OK")
 		get_tree().quit(0)

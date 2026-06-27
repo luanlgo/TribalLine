@@ -88,6 +88,14 @@ func _build_ui() -> void:
 	recall_btn.pressed.connect(func() -> void: NetworkManager.request_recall_marches())
 	bot.add_child(recall_btn)
 
+	var test_btn := Button.new()
+	test_btn.text = "TESTE PvP"
+	test_btn.custom_minimum_size = Vector2(110,0)
+	test_btn.tooltip_text = "Abre uma batalha de teste heroi-vs-heroi com a quantidade de tropas escolhida (nao gasta nada)."
+	test_btn.add_theme_color_override("font_color", Color(0.6, 0.9, 1.0))
+	test_btn.pressed.connect(func() -> void: _open_test_battle_popup())
+	bot.add_child(test_btn)
+
 	# ── Notificacao ────────────────────────────────────────────────────────
 	_notif_lbl = Label.new()
 	_notif_lbl.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
@@ -202,6 +210,75 @@ func _toggle_train_panel() -> void:
 	_train_panel.visible = not _train_panel.visible
 	if _train_panel.visible and _train_panel.has_method("refresh"):
 		_train_panel.refresh()
+
+## Popup de batalha de teste (PvP): escolhe tipo/quantidade de tropa e dispara
+## uma batalha heroi-vs-heroi gerada (mesmo exercito dos dois lados).
+func _open_test_battle_popup() -> void:
+	var win := Window.new()
+	win.title = "Batalha de Teste (PvP)"
+	win.size = Vector2i(360, 250)
+	win.exclusive = true
+	add_child(win)
+	win.popup_centered()
+	win.close_requested.connect(func() -> void: win.queue_free())
+
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for s in ["margin_left","margin_right","margin_top","margin_bottom"]:
+		margin.add_theme_constant_override(s, 14)
+	win.add_child(margin)
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 10)
+	margin.add_child(vbox)
+
+	var info := Label.new()
+	info.text = "Gera uma batalha heroi-vs-heroi.\nMesma quantidade de tropas dos dois lados.\nNao gasta tropas/heroi reais."
+	info.add_theme_font_size_override("font_size", 11)
+	info.modulate = Color(0.85, 0.85, 0.85)
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(info)
+
+	# Tipo de tropa (lista as unidades do jogo)
+	var uids: Array = []
+	var trow := HBoxContainer.new()
+	trow.add_theme_constant_override("separation", 6)
+	vbox.add_child(trow)
+	var tlbl := Label.new()
+	tlbl.text = "Tropa:"
+	tlbl.custom_minimum_size = Vector2(80, 0)
+	trow.add_child(tlbl)
+	var type_opt := OptionButton.new()
+	type_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for uid in DataManager.units:
+		var ud: UnitData = DataManager.units[uid]
+		type_opt.add_item(ud.display_name)
+		uids.append(uid)
+	trow.add_child(type_opt)
+
+	# Quantidade por lado
+	var qrow := HBoxContainer.new()
+	qrow.add_theme_constant_override("separation", 6)
+	vbox.add_child(qrow)
+	var qlbl := Label.new()
+	qlbl.text = "Qtd / lado:"
+	qlbl.custom_minimum_size = Vector2(80, 0)
+	qrow.add_child(qlbl)
+	var spin := SpinBox.new()
+	spin.min_value = 0
+	spin.max_value = 1000
+	spin.value = 50
+	spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	qrow.add_child(spin)
+
+	var go := Button.new()
+	go.text = "INICIAR BATALHA"
+	go.pressed.connect(func() -> void:
+		var uid: String = "warrior"
+		if type_opt.selected >= 0 and type_opt.selected < uids.size():
+			uid = uids[type_opt.selected]
+		NetworkManager.request_test_battle(int(spin.value), uid)
+		win.queue_free())
+	vbox.add_child(go)
 
 func _process(delta: float) -> void:
 	if _notif_timer > 0.0:
