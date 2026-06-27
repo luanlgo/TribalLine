@@ -636,3 +636,158 @@ func _update_camera(delta: float) -> void:
 	if _shake > 0.0:
 		off = Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * _shake
 	_camera.position = _cam_pos + off
+
+# ---------------------------------------------------------------------------
+# VFX de habilidades — cada tipo tem uma forma/cor propria (servidor manda o
+# evento; ver BattleManager._emit_ability_fx). Aliado = tons quentes/claros,
+# inimigo = tons avermelhados, para leitura rapida.
+# ---------------------------------------------------------------------------
+func play_fx(battle_id: int, events: Array) -> void:
+	if battle_id != _battle_id or _ended:
+		return
+	for ev in events:
+		_spawn_ability_fx(ev)
+
+func _spawn_ability_fx(ev: Dictionary) -> void:
+	var pos := Vector3(float(ev.get("x", 0.0)), 0.0, float(ev.get("z", 0.0)))
+	var tpos := Vector3(float(ev.get("tx", ev.get("x", 0.0))), 0.0, float(ev.get("tz", ev.get("z", 0.0))))
+	var ally: bool = int(ev.get("team", 0)) == _my_team
+	match String(ev.get("type", "")):
+		"aoe":
+			var r: float = float(ev.get("r", 5.0))
+			_vfx_ring(pos, r, (Color(1.0, 0.6, 0.2) if ally else Color(1.0, 0.35, 0.25)), 0.5, 0.2)
+			_vfx_flash(pos, Color(1.0, 0.7, 0.3), 1.4)
+			_shake_if_mine(ev, 0.35)
+		"knockback":
+			_vfx_ring(pos, float(ev.get("r", 4.0)) + 1.0, Color(0.9, 0.95, 1.0), 0.3, 0.1)
+			_shake_if_mine(ev, 0.3)
+		"taunt":
+			var rt: float = float(ev.get("r", 7.0))
+			_vfx_ring(pos, rt, Color(0.75, 0.4, 1.0), 0.55, 0.15)
+			_vfx_ring(pos, rt * 0.6, Color(0.75, 0.4, 1.0), 0.4, 0.15)
+		"stun":
+			_vfx_ring(tpos, 1.8, Color(1.0, 0.9, 0.2), 0.45, 0.5)
+			_vfx_flash(tpos, Color(1.0, 0.95, 0.4), 0.9)
+		"mark":
+			_vfx_ring(tpos, 1.5, Color(1.0, 0.3, 0.3), 0.7, 0.4)
+		"line":
+			_vfx_beam(pos, tpos, float(ev.get("w", 2.0)), (Color(0.5, 0.9, 1.0) if ally else Color(1.0, 0.5, 0.4)))
+		"dash":
+			_vfx_beam(pos, tpos, 1.2, Color(0.85, 0.92, 1.0))
+			_vfx_flash(tpos, Color(0.9, 0.95, 1.0), 1.0)
+			_shake_if_mine(ev, 0.25)
+		"burst":
+			_vfx_flash(tpos, (Color(1.0, 0.95, 0.4) if ally else Color(1.0, 0.5, 0.3)), 1.6)
+		"dot":
+			_vfx_cloud(tpos, Color(0.4, 0.9, 0.3))
+		"buff":
+			_vfx_cloud(pos, Color(1.0, 0.7, 0.2))
+		"block":
+			_vfx_dome(pos, Color(0.35, 0.6, 1.0))
+
+## Treme a tela se o efeito veio do meu time (peso do impacto).
+func _shake_if_mine(ev: Dictionary, mag: float) -> void:
+	if int(ev.get("team", 0)) == _my_team:
+		_shake = maxf(_shake, mag)
+
+func _vfx_mat(col: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = col
+	return m
+
+## Anel no chao que expande de pequeno ate 'radius' e some.
+func _vfx_ring(center: Vector3, radius: float, col: Color, dur: float, y: float) -> void:
+	var ring := MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = max(0.2, radius * 0.78)
+	tm.outer_radius = max(0.4, radius)
+	ring.mesh = tm
+	ring.position = center + Vector3(0, y, 0)
+	var m := _vfx_mat(col)
+	ring.material_override = m
+	add_child(ring)
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3.ONE, dur).from(Vector3(0.25, 0.25, 0.25))
+	tw.tween_property(m, "albedo_color", Color(col.r, col.g, col.b, 0.0), dur)
+	tw.set_parallel(false)
+	tw.tween_callback(ring.queue_free)
+
+## Feixe/rastro retangular de 'from' a 'to' que some (linha, dash).
+func _vfx_beam(from: Vector3, to: Vector3, width: float, col: Color) -> void:
+	var dir := to - from
+	var length: float = dir.length()
+	if length < 0.5:
+		return
+	var box := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(max(0.4, width), 0.5, length)
+	box.mesh = bm
+	box.position = from + dir * 0.5 + Vector3(0, 0.5, 0)
+	var m := _vfx_mat(col)
+	box.material_override = m
+	add_child(box)
+	# look_at exige o no na arvore (transform global) — por isso depois do add_child.
+	box.look_at(box.position + dir.normalized(), Vector3.UP)
+	var tw := create_tween()
+	tw.tween_property(m, "albedo_color", Color(col.r, col.g, col.b, 0.0), 0.3).from(col)
+	tw.tween_callback(box.queue_free)
+
+## Estouro esferico que cresce e some (tiro/impacto).
+func _vfx_flash(pos: Vector3, col: Color, max_scale: float) -> void:
+	var s := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 1.0
+	sm.height = 2.0
+	s.mesh = sm
+	s.position = pos + Vector3(0, 1.0, 0)
+	var m := _vfx_mat(col)
+	s.material_override = m
+	add_child(s)
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(s, "scale", Vector3(max_scale, max_scale, max_scale), 0.3).from(Vector3(0.3, 0.3, 0.3))
+	tw.tween_property(m, "albedo_color", Color(col.r, col.g, col.b, 0.0), 0.3)
+	tw.set_parallel(false)
+	tw.tween_callback(s.queue_free)
+
+## Nuvem de particulas que sobe (veneno/buff). Frequencia baixa -> no proprio.
+func _vfx_cloud(pos: Vector3, col: Color) -> void:
+	var p := CPUParticles3D.new()
+	p.position = pos + Vector3(0, 0.4, 0)
+	p.amount = 18
+	p.lifetime = 0.9
+	p.one_shot = true
+	p.explosiveness = 0.25
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius = 1.2
+	p.direction = Vector3(0, 1, 0)
+	p.spread = 35.0
+	p.gravity = Vector3(0, 1.5, 0)
+	p.initial_velocity_min = 0.4
+	p.initial_velocity_max = 1.3
+	p.color = col
+	p.scale_amount_min = 0.2
+	p.scale_amount_max = 0.45
+	add_child(p)
+	p.emitting = true
+	var tmr := get_tree().create_timer(1.3)
+	tmr.timeout.connect(func() -> void:
+		if is_instance_valid(p): p.queue_free())
+
+## Cupula de escudo que aparece e some (block).
+func _vfx_dome(pos: Vector3, col: Color) -> void:
+	var s := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 1.9
+	sm.height = 3.8
+	s.mesh = sm
+	s.position = pos + Vector3(0, 1.2, 0)
+	var m := _vfx_mat(Color(col.r, col.g, col.b, 0.4))
+	s.material_override = m
+	add_child(s)
+	var tw := create_tween()
+	tw.tween_property(m, "albedo_color", Color(col.r, col.g, col.b, 0.0), 0.7).from(Color(col.r, col.g, col.b, 0.4))
+	tw.tween_callback(s.queue_free)

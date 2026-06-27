@@ -19,6 +19,7 @@ signal local_resources_updated()  # emitido no cliente quando recursos chegam
 # Batalha 3D (cliente)
 signal battle_open(meta: Dictionary)       # servidor mandou abrir a arena
 signal battle_state(battle_id: int, snapshot: PackedInt32Array)
+signal battle_fx(battle_id: int, events: Array)   # efeitos de habilidade (VFX)
 signal battle_closed(battle_id: int)
 
 # Info local do cliente
@@ -126,6 +127,12 @@ func _stream_battles() -> void:
 		var snap: PackedInt32Array = BattleManager.snapshot(b["id"])
 		for peer in b["viewers"]:
 			_battle_state.rpc_id(peer, b["id"], snap)
+		# Efeitos de habilidade acumulados desde o ultimo envio (VFX distintos).
+		var fx: Array = b.get("fx", [])
+		if not fx.is_empty():
+			for peer in b["viewers"]:
+				_battle_fx.rpc_id(peer, b["id"], fx)
+			b["fx"] = []
 
 ## NPCs visiveis para um jogador (apenas os criados por ele).
 func _npcs_for(username: String) -> Array:
@@ -521,6 +528,11 @@ func _open_arena(meta: Dictionary) -> void:
 @rpc("authority", "unreliable")
 func _battle_state(battle_id: int, snapshot: PackedInt32Array) -> void:
 	battle_state.emit(battle_id, snapshot)
+
+## Efeitos de habilidade (VFX) para os espectadores desenharem.
+@rpc("authority", "reliable")
+func _battle_fx(battle_id: int, events: Array) -> void:
+	battle_fx.emit(battle_id, events)
 
 ## Batalha terminou: fecha a arena.
 @rpc("authority", "reliable")

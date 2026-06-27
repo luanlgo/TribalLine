@@ -726,6 +726,47 @@ func _resolve_ability(b: Dictionary, u: Dictionary, ab: Dictionary) -> void:
 				if not o["alive"] or o["team"] == u["team"] or o["is_tower"]: continue
 				if Vector2(o["x"], o["z"]).distance_to(upos) <= rad3:
 					_add_effect(o, {"kind":"taunt_to","net":u["net"],"t":ab.get("dur",3.0)})
+	_emit_ability_fx(b, u, ab, t, nearest, upos)
+
+## Acumula um evento de efeito visual (enviado aos espectadores no streaming).
+func _push_fx(b: Dictionary, ev: Dictionary) -> void:
+	if not b.has("fx"):
+		b["fx"] = []
+	if b["fx"].size() < 64:
+		b["fx"].append(ev)
+
+## Deriva o VFX de uma habilidade (forma/posicao/alvo) para o cliente desenhar.
+## Reaproveita upos (origem pre-dash) e nearest (alvo pre-cast) da resolucao.
+func _emit_ability_fx(b: Dictionary, u: Dictionary, ab: Dictionary, t: String,
+		nearest: Dictionary, upos: Vector2) -> void:
+	var ev: Dictionary = {"type": t, "team": u["team"], "x": upos.x, "z": upos.y}
+	match t:
+		"dash":
+			ev["tx"] = u["x"]; ev["tz"] = u["z"]
+		"aoe":
+			var c := upos
+			if ab.get("at_enemy", false) and not nearest.is_empty():
+				c = Vector2(nearest["x"], nearest["z"])
+			ev["x"] = c.x; ev["z"] = c.y; ev["r"] = ab.get("radius", 5.0)
+		"line":
+			if nearest.is_empty(): return
+			var dir := (Vector2(nearest["x"], nearest["z"]) - upos)
+			if dir.length() < 0.01: dir = Vector2(0, 1)
+			dir = dir.normalized()
+			var length: float = ab.get("length", 8.0)
+			var endp := upos + dir * length
+			ev["tx"] = endp.x; ev["tz"] = endp.y
+			ev["w"] = ab.get("width", 2.0); ev["len"] = length
+		"burst", "dot", "stun", "mark":
+			if nearest.is_empty(): return
+			ev["x"] = nearest["x"]; ev["z"] = nearest["z"]
+		"knockback":
+			ev["r"] = ab.get("radius", 4.0)
+		"taunt":
+			ev["r"] = ab.get("radius", 7.0)
+		"block", "buff":
+			ev["x"] = u["x"]; ev["z"] = u["z"]
+	_push_fx(b, ev)
 
 ## Empurra a unidade para longe de 'from' por 'dist' (clamp na arena).
 func _knock(o: Dictionary, from: Vector2, dist: float) -> void:

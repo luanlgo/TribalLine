@@ -57,6 +57,7 @@ func _ready() -> void:
 	NetworkManager.local_resources_updated.connect(_sync_hud_from_server)
 	NetworkManager.battle_open.connect(_on_battle_open)
 	NetworkManager.battle_state.connect(_on_battle_state)
+	NetworkManager.battle_fx.connect(_on_battle_fx)
 	NetworkManager.battle_closed.connect(_on_battle_closed)
 
 	if GameManager.current_state != GameManager.GameState.PLAYING:
@@ -265,6 +266,10 @@ func _on_battle_open(meta: Dictionary) -> void:
 func _on_battle_state(battle_id: int, snapshot: PackedInt32Array) -> void:
 	if is_instance_valid(_arena):
 		_arena.update_state(battle_id, snapshot)
+
+func _on_battle_fx(battle_id: int, events: Array) -> void:
+	if is_instance_valid(_arena):
+		_arena.play_fx(battle_id, events)
 
 func _on_battle_closed(_battle_id: int) -> void:
 	_close_arena()
